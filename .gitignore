@@ -1,0 +1,25 @@
+# Build folders
+bin/
+obj/
+
+# macOS
+.DS_Store
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+
+# Node
+node_modules/
+dist/
+
+# Environment files
+.env
+.env.*
+
+# User Secrets
+secrets.json
+
+# Logs
+*.log
