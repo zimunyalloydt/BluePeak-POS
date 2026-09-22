@@ -3,13 +3,14 @@ import {
     ActivityIndicator,
     Alert,
     RefreshControl,
-    SafeAreaView,
     ScrollView,
     StyleSheet,
     Text,
     Pressable,
     View,
 } from "react-native";
+
+import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
 
 import { useAuth } from "../../context/AuthContext";
@@ -32,7 +33,7 @@ export default function AdminDashboard() {
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
 
-    const loadDashboard = async () => {
+    const loadDashboard = useCallback(async () => {
         try {
             const data = await getAdminDashboard();
 
@@ -55,12 +56,27 @@ export default function AdminDashboard() {
             setLoading(false);
             setRefreshing(false);
         }
-    };
+    }, []);
 
     useFocusEffect(
         useCallback(() => {
-            loadDashboard();
-        }, [])
+            let cancelled = false;
+
+            const run = async () => {
+                // Defer so setState isn't called synchronously
+                // within the focus effect callback
+                await Promise.resolve();
+                if (!cancelled) {
+                    await loadDashboard();
+                }
+            };
+
+            run();
+
+            return () => {
+                cancelled = true;
+            };
+        }, [loadDashboard])
     );
 
     const refresh = async () => {
@@ -75,12 +91,8 @@ export default function AdminDashboard() {
 
     if (loading) {
         return (
-            <SafeAreaView
-                style={styles.loadingScreen}
-            >
-                <ActivityIndicator
-                    size="large"
-                />
+            <SafeAreaView style={styles.loadingScreen}>
+                <ActivityIndicator size="large" />
 
                 <Text style={styles.loadingText}>
                     Loading dashboard...
@@ -92,9 +104,7 @@ export default function AdminDashboard() {
     return (
         <SafeAreaView style={styles.container}>
             <ScrollView
-                contentContainerStyle={
-                    styles.content
-                }
+                contentContainerStyle={styles.content}
                 refreshControl={
                     <RefreshControl
                         refreshing={refreshing}
@@ -106,38 +116,24 @@ export default function AdminDashboard() {
 
                 <View style={styles.header}>
                     <View>
-                        <Text
-                            style={styles.brand}
-                        >
+                        <Text style={styles.brand}>
                             BLUEPEAK
                         </Text>
 
-                        <Text
-                            style={styles.title}
-                        >
+                        <Text style={styles.title}>
                             Admin Dashboard
                         </Text>
 
-                        <Text
-                            style={
-                                styles.subtitle
-                            }
-                        >
+                        <Text style={styles.subtitle}>
                             Business overview
                         </Text>
                     </View>
 
                     <Pressable
                         onPress={handleLogout}
-                        style={
-                            styles.logoutButton
-                        }
+                        style={styles.logoutButton}
                     >
-                        <Text
-                            style={
-                                styles.logoutText
-                            }
-                        >
+                        <Text style={styles.logoutText}>
                             Logout
                         </Text>
                     </Pressable>
@@ -146,16 +142,8 @@ export default function AdminDashboard() {
                 {/* USER */}
 
                 <View style={styles.userCard}>
-                    <View
-                        style={
-                            styles.avatar
-                        }
-                    >
-                        <Text
-                            style={
-                                styles.avatarText
-                            }
-                        >
+                    <View style={styles.avatar}>
+                        <Text style={styles.avatarText}>
                             {user?.fullName
                                 ?.charAt(0)
                                 .toUpperCase()}
@@ -163,27 +151,15 @@ export default function AdminDashboard() {
                     </View>
 
                     <View>
-                        <Text
-                            style={
-                                styles.welcome
-                            }
-                        >
+                        <Text style={styles.welcome}>
                             Welcome back
                         </Text>
 
-                        <Text
-                            style={
-                                styles.fullName
-                            }
-                        >
+                        <Text style={styles.fullName}>
                             {user?.fullName}
                         </Text>
 
-                        <Text
-                            style={
-                                styles.role
-                            }
-                        >
+                        <Text style={styles.role}>
                             Administrator
                         </Text>
                     </View>
@@ -192,31 +168,18 @@ export default function AdminDashboard() {
                 {/* MAIN STAT */}
 
                 <View style={styles.mainStat}>
-                    <Text
-                        style={
-                            styles.mainStatLabel
-                        }
-                    >
+                    <Text style={styles.mainStatLabel}>
                         TODAY'S SALES
                     </Text>
 
-                    <Text
-                        style={
-                            styles.mainStatValue
-                        }
-                    >
+                    <Text style={styles.mainStatValue}>
                         $
                         {Number(
-                            dashboard?.todaySales ||
-                                0
+                            dashboard?.todaySales || 0
                         ).toFixed(2)}
                     </Text>
 
-                    <Text
-                        style={
-                            styles.mainStatFooter
-                        }
-                    >
+                    <Text style={styles.mainStatFooter}>
                         Total sales for today
                     </Text>
                 </View>
@@ -225,64 +188,37 @@ export default function AdminDashboard() {
 
                 <View style={styles.grid}>
                     <View style={styles.statCard}>
-                        <Text
-                            style={
-                                styles.statLabel
-                            }
-                        >
+                        <Text style={styles.statLabel}>
                             TODAY'S PROFIT
                         </Text>
 
-                        <Text
-                            style={
-                                styles.statValue
-                            }
-                        >
+                        <Text style={styles.statValue}>
                             $
                             {Number(
-                                dashboard?.todayProfit ||
-                                    0
+                                dashboard?.todayProfit || 0
                             ).toFixed(2)}
                         </Text>
                     </View>
 
                     <View style={styles.statCard}>
-                        <Text
-                            style={
-                                styles.statLabel
-                            }
-                        >
+                        <Text style={styles.statLabel}>
                             TRANSACTIONS
                         </Text>
 
-                        <Text
-                            style={
-                                styles.statValue
-                            }
-                        >
-                            {dashboard?.transactions ||
-                                0}
+                        <Text style={styles.statValue}>
+                            {dashboard?.transactions || 0}
                         </Text>
                     </View>
 
                     <View style={styles.statCard}>
-                        <Text
-                            style={
-                                styles.statLabel
-                            }
-                        >
+                        <Text style={styles.statLabel}>
                             AVERAGE SALE
                         </Text>
 
-                        <Text
-                            style={
-                                styles.statValue
-                            }
-                        >
+                        <Text style={styles.statValue}>
                             $
                             {Number(
-                                dashboard?.averageSale ||
-                                    0
+                                dashboard?.averageSale || 0
                             ).toFixed(2)}
                         </Text>
                     </View>
@@ -290,11 +226,7 @@ export default function AdminDashboard() {
 
                 {/* MANAGEMENT */}
 
-                <Text
-                    style={
-                        styles.sectionTitle
-                    }
-                >
+                <Text style={styles.sectionTitle}>
                     Management
                 </Text>
 
@@ -302,38 +234,20 @@ export default function AdminDashboard() {
                     <Pressable
                         style={styles.menuCard}
                         onPress={() =>
-                            router.push(
-                                "/admin/products"
-                            )
+                            router.push("/admin/products")
                         }
                     >
-                        <View
-                            style={
-                                styles.menuIcon
-                            }
-                        >
-                            <Text
-                                style={
-                                    styles.menuIconText
-                                }
-                            >
+                        <View style={styles.menuIcon}>
+                            <Text style={styles.menuIconText}>
                                 P
                             </Text>
                         </View>
 
-                        <Text
-                            style={
-                                styles.menuTitle
-                            }
-                        >
+                        <Text style={styles.menuTitle}>
                             Products
                         </Text>
 
-                        <Text
-                            style={
-                                styles.menuDescription
-                            }
-                        >
+                        <Text style={styles.menuDescription}>
                             Manage products
                         </Text>
                     </Pressable>
@@ -341,38 +255,20 @@ export default function AdminDashboard() {
                     <Pressable
                         style={styles.menuCard}
                         onPress={() =>
-                            router.push(
-                                "/admin/users"
-                            )
+                            router.push("/admin/users")
                         }
                     >
-                        <View
-                            style={
-                                styles.menuIcon
-                            }
-                        >
-                            <Text
-                                style={
-                                    styles.menuIconText
-                                }
-                            >
+                        <View style={styles.menuIcon}>
+                            <Text style={styles.menuIconText}>
                                 S
                             </Text>
                         </View>
 
-                        <Text
-                            style={
-                                styles.menuTitle
-                            }
-                        >
+                        <Text style={styles.menuTitle}>
                             Staff
                         </Text>
 
-                        <Text
-                            style={
-                                styles.menuDescription
-                            }
-                        >
+                        <Text style={styles.menuDescription}>
                             Manage users
                         </Text>
                     </Pressable>
@@ -380,38 +276,20 @@ export default function AdminDashboard() {
                     <Pressable
                         style={styles.menuCard}
                         onPress={() =>
-                            router.push(
-                                "/admin/sales"
-                            )
+                            router.push("/admin/sales")
                         }
                     >
-                        <View
-                            style={
-                                styles.menuIcon
-                            }
-                        >
-                            <Text
-                                style={
-                                    styles.menuIconText
-                                }
-                            >
+                        <View style={styles.menuIcon}>
+                            <Text style={styles.menuIconText}>
                                 $
                             </Text>
                         </View>
 
-                        <Text
-                            style={
-                                styles.menuTitle
-                            }
-                        >
+                        <Text style={styles.menuTitle}>
                             Sales
                         </Text>
 
-                        <Text
-                            style={
-                                styles.menuDescription
-                            }
-                        >
+                        <Text style={styles.menuDescription}>
                             View transactions
                         </Text>
                     </Pressable>
@@ -419,38 +297,20 @@ export default function AdminDashboard() {
                     <Pressable
                         style={styles.menuCard}
                         onPress={() =>
-                            router.push(
-                                "/admin/tasks"
-                            )
+                            router.push("/admin/tasks")
                         }
                     >
-                        <View
-                            style={
-                                styles.menuIcon
-                            }
-                        >
-                            <Text
-                                style={
-                                    styles.menuIconText
-                                }
-                            >
+                        <View style={styles.menuIcon}>
+                            <Text style={styles.menuIconText}>
                                 T
                             </Text>
                         </View>
 
-                        <Text
-                            style={
-                                styles.menuTitle
-                            }
-                        >
+                        <Text style={styles.menuTitle}>
                             Tasks
                         </Text>
 
-                        <Text
-                            style={
-                                styles.menuDescription
-                            }
-                        >
+                        <Text style={styles.menuDescription}>
                             Manage tasks
                         </Text>
                     </Pressable>
@@ -460,15 +320,9 @@ export default function AdminDashboard() {
 
                 <Pressable
                     onPress={refresh}
-                    style={
-                        styles.refreshButton
-                    }
+                    style={styles.refreshButton}
                 >
-                    <Text
-                        style={
-                            styles.refreshButtonText
-                        }
-                    >
+                    <Text style={styles.refreshButtonText}>
                         Refresh Dashboard
                     </Text>
                 </Pressable>

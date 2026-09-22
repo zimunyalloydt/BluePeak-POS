@@ -13,4 +13,6 @@ public class SaleListDto
     public string PaymentMethod { get; set; } = "";
 
     public decimal Total { get; set; }
+
+    public decimal Profit { get; set; }
 }

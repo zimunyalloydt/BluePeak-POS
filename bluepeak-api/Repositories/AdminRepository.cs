@@ -41,16 +41,16 @@ public class AdminRepository : IAdminRepository
         };
     }
 
-    public async Task<List<SaleListDto>> GetSalesAsync()
+public async Task<List<SaleListDto>> GetSalesAsync()
 {
     return await _context.Sales
         .Include(x => x.User)
         .Include(x => x.Items)
+            .ThenInclude(x => x.Product)
         .OrderByDescending(x => x.SaleDate)
         .Select(x => new SaleListDto
         {
             SaleId = x.SaleId,
-
             SaleDate = x.SaleDate,
 
             Cashier = x.User == null
@@ -61,7 +61,13 @@ public class AdminRepository : IAdminRepository
 
             PaymentMethod = x.PaymentMethod,
 
-            Total = x.Total
+            Total = x.Total,
+
+            Profit = x.Items.Sum(i =>
+                (i.UnitPrice - (i.Product == null
+                    ? 0
+                    : i.Product.CostPrice)) * i.Quantity
+            )
         })
         .ToListAsync();
 }
@@ -148,5 +154,65 @@ public async Task UpdateUserPermissionsAsync(
     }
 
     await _context.SaveChangesAsync();
+}
+
+
+public async Task<SaleDetailsDto?> GetSaleDetailsAsync(int saleId)
+{
+    var sale = await _context.Sales
+        .Include(s => s.User)
+        .Include(s => s.Items)
+            .ThenInclude(i => i.Product)
+        .FirstOrDefaultAsync(s => s.SaleId == saleId);
+
+    if (sale == null)
+        return null;
+
+    return new SaleDetailsDto
+    {
+        SaleId = sale.SaleId,
+        SaleDate = sale.SaleDate,
+
+        Cashier = sale.User == null
+            ? "Unknown"
+            : sale.User.FirstName + " " + sale.User.LastName,
+
+        CustomerName = sale.CustomerName,
+
+        PaymentMethod = sale.PaymentMethod,
+
+        Subtotal = sale.Subtotal,
+        Vat = sale.Vat,
+        Total = sale.Total,
+
+        AmountPaid = sale.AmountPaid,
+        ChangeGiven = sale.ChangeGiven,
+
+        Profit = sale.Items.Sum(i =>
+            (i.UnitPrice - (i.Product?.CostPrice ?? 0)) * i.Quantity
+        ),
+
+        Items = sale.Items.Select(i => new SaleItemDetailsDto
+        {
+            SaleItemId = i.SaleItemId,
+
+            ProductId = i.ProductId,
+
+            ProductName = i.Product == null
+                ? "Unknown Product"
+                : i.Product.ProductName,
+
+            Quantity = i.Quantity,
+
+            UnitPrice = i.UnitPrice,
+
+            CostPrice = i.Product?.CostPrice ?? 0,
+
+            Total = i.Total,
+
+            Profit = (i.UnitPrice - (i.Product?.CostPrice ?? 0))
+                     * i.Quantity
+        }).ToList()
+    };
 }
 }
