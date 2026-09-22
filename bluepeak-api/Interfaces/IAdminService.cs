@@ -6,6 +6,7 @@ public interface IAdminService
 {
     Task<DashboardDto> GetDashboardAsync();
     Task<List<SaleListDto>> GetSalesAsync();
+    Task<SaleDetailsDto?> GetSaleDetailsAsync(int saleId);
     Task<List<UserListDto>> GetUsersAsync();
     Task<List<PermissionDto>> GetUserPermissionsAsync(int userId);
 

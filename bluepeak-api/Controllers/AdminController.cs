@@ -35,6 +35,20 @@ public async Task<IActionResult> GetUsers()
     return Ok(await _service.GetUsersAsync());
 }
 
+[HttpGet("sales/{id}")]
+public async Task<IActionResult> GetSaleDetails(int id)
+{
+    var sale = await _service.GetSaleDetailsAsync(id);
+
+    if (sale == null)
+        return NotFound(new
+        {
+            message = "Sale not found."
+        });
+
+    return Ok(sale);
+}
+
 [HttpPost("users")]
 public async Task<IActionResult> CreateUser(CreateUserDto dto)
 {

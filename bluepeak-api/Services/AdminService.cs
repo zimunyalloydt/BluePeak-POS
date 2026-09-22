@@ -17,6 +17,11 @@ public Task<DashboardDto> GetDashboardAsync()
 {
     return _repository.GetSalesAsync();
 }
+
+public Task<SaleDetailsDto?> GetSaleDetailsAsync(int saleId)
+{
+    return _repository.GetSaleDetailsAsync(saleId);
+}
     public AdminService(IAdminRepository repository)
     {
         _repository = repository;
