@@ -19,7 +19,7 @@ import * as ImagePicker from "expo-image-picker";
 import api from "../../../services/api";
 import { getProduct } from "../../../services/productService";
 
-const API_SERVER = "http://192.168.0.120:5160";
+const API_SERVER = "http://192.168.0.217:5160";
 
 type Product = {
     productId: number;

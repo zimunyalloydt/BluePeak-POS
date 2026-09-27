@@ -2,6 +2,7 @@ import React, {
     useCallback,
     useEffect,
     useMemo,
+    useRef,
     useState,
 } from "react";
 import {
@@ -18,6 +19,7 @@ import {
     StyleSheet,
     Text,
     TextInput,
+    useWindowDimensions,
     View,
 } from "react-native";
 import { useRouter } from "expo-router";
@@ -44,11 +46,17 @@ type CartItem = {
     quantity: number;
 };
 
-const API_SERVER = "http://192.168.0.120:5160";
+const API_SERVER = "http://192.168.0.217:5160";
 
 export default function CashierScreen() {
     const router = useRouter();
     const { user, logout } = useAuth();
+    const { width } = useWindowDimensions();
+
+    const numColumns = width >= 768 ? 3 : 2;
+
+    const scrollViewRef = useRef<ScrollView>(null);
+    const checkoutY = useRef(0);
 
     const [products, setProducts] = useState<Product[]>([]);
     const [cart, setCart] = useState<CartItem[]>([]);
@@ -455,11 +463,14 @@ export default function CashierScreen() {
                 <View style={styles.productCardContent}>
                     <Text
                         style={styles.productName}
-                        numberOfLines={2}
+                        numberOfLines={1}
                     >
                         {item.productName}
                     </Text>
-                    <Text style={styles.productCode}>
+                    <Text
+                        style={styles.productCode}
+                        numberOfLines={1}
+                    >
                         {item.productCode}
                     </Text>
                     <Text style={styles.productPrice}>
@@ -477,7 +488,10 @@ export default function CashierScreen() {
             <KeyboardAvoidingView
                 style={styles.container}
                 behavior={
-                    Platform.OS === "ios" ? "padding" : undefined
+                    Platform.OS === "ios" ? "padding" : "height"
+                }
+                keyboardVerticalOffset={
+                    Platform.OS === "ios" ? 0 : 20
                 }
             >
                 <View style={styles.header}>
@@ -510,8 +524,11 @@ export default function CashierScreen() {
                 </View>
 
                 <ScrollView
+                    ref={scrollViewRef}
                     contentContainerStyle={styles.scrollContent}
                     keyboardShouldPersistTaps="handled"
+                    automaticallyAdjustKeyboardInsets
+                    keyboardDismissMode="interactive"
                 >
                     <TextInput
                         value={search}
@@ -558,12 +575,13 @@ export default function CashierScreen() {
                         </View>
                     ) : (
                         <FlatList
+                            key={numColumns}
                             data={filteredProducts}
                             renderItem={renderProduct}
                             keyExtractor={(item) =>
                                 item.productId.toString()
                             }
-                            numColumns={2}
+                            numColumns={numColumns}
                             scrollEnabled={false}
                             columnWrapperStyle={styles.productRow}
                         />
@@ -721,7 +739,13 @@ export default function CashierScreen() {
                         )}
 
                         {cart.length > 0 && (
-                            <View style={styles.checkout}>
+                            <View
+                                style={styles.checkout}
+                                onLayout={(e) => {
+                                    checkoutY.current =
+                                        e.nativeEvent.layout.y;
+                                }}
+                            >
                                 <View style={styles.totalRow}>
                                     <Text
                                         style={styles.totalLabel}
@@ -790,6 +814,16 @@ export default function CashierScreen() {
                                 <TextInput
                                     value={amountPaid}
                                     onChangeText={setAmountPaid}
+                                    onFocus={() => {
+                                        setTimeout(() => {
+                                            scrollViewRef.current?.scrollTo(
+                                                {
+                                                    y: checkoutY.current,
+                                                    animated: true,
+                                                }
+                                            );
+                                        }, 150);
+                                    }}
                                     placeholder="0.00"
                                     placeholderTextColor="#8A8F98"
                                     keyboardType="decimal-pad"
@@ -1085,75 +1119,75 @@ const styles = StyleSheet.create({
     },
     logoutText: { color: "#FFFFFF", fontSize: 11, fontWeight: "700" },
 
-    scrollContent: { padding: 16, paddingBottom: 40 },
+    scrollContent: { padding: 12, paddingBottom: 40 },
 
     searchInput: {
         backgroundColor: "#FFFFFF",
         borderRadius: 12,
         paddingHorizontal: 16,
-        paddingVertical: 13,
-        fontSize: 15,
+        paddingVertical: 11,
+        fontSize: 14,
         color: "#172033",
         borderWidth: 1,
         borderColor: "#E1E5EA",
-        marginBottom: 18,
+        marginBottom: 14,
     },
 
     sectionHeader: {
         flexDirection: "row",
         justifyContent: "space-between",
         alignItems: "center",
-        marginBottom: 12,
+        marginBottom: 10,
     },
     sectionTitle: {
-        fontSize: 20,
+        fontSize: 18,
         fontWeight: "800",
         color: "#172033",
     },
-    sectionSubtitle: { color: "#7B8492", fontSize: 12, marginTop: 3 },
-    refreshText: { color: "#1769E0", fontWeight: "700", fontSize: 13 },
+    sectionSubtitle: { color: "#7B8492", fontSize: 11, marginTop: 2 },
+    refreshText: { color: "#1769E0", fontWeight: "700", fontSize: 12 },
 
     productRow: {
-        justifyContent: "space-between",
-        marginBottom: 12,
+        justifyContent: "flex-start",
+        gap: 8,
+        marginBottom: 8,
     },
     productCard: {
-        width: "48.5%",
+        flex: 1,
         backgroundColor: "#FFFFFF",
-        borderRadius: 14,
+        borderRadius: 10,
         overflow: "hidden",
         borderWidth: 1,
         borderColor: "#E3E7EC",
     },
     productImage: {
         width: "100%",
-        height: 115,
+        height: 70,
         resizeMode: "cover",
     },
     productImagePlaceholder: {
-        height: 115,
+        height: 70,
         backgroundColor: "#E8EDF4",
         alignItems: "center",
         justifyContent: "center",
     },
     productImageText: {
-        fontSize: 28,
+        fontSize: 20,
         fontWeight: "900",
         color: "#8190A5",
     },
-    productCardContent: { padding: 11 },
+    productCardContent: { padding: 7 },
     productName: {
-        fontSize: 14,
+        fontSize: 12,
         fontWeight: "700",
         color: "#172033",
-        minHeight: 36,
     },
-    productCode: { color: "#8A93A0", fontSize: 10, marginTop: 4 },
+    productCode: { color: "#8A93A0", fontSize: 9, marginTop: 2 },
     productPrice: {
         color: "#1769E0",
-        fontSize: 16,
+        fontSize: 13,
         fontWeight: "900",
-        marginTop: 7,
+        marginTop: 4,
     },
 
     loadingContainer: { paddingVertical: 40, alignItems: "center" },
@@ -1172,34 +1206,34 @@ const styles = StyleSheet.create({
     },
     emptySubtitle: { color: "#7B8492", marginTop: 5 },
 
-    cartSection: { marginTop: 28 },
+    cartSection: { marginTop: 20 },
     cartHeader: {
         flexDirection: "row",
         justifyContent: "space-between",
         alignItems: "center",
-        marginBottom: 12,
+        marginBottom: 10,
     },
     clearText: { color: "#D64545", fontWeight: "700" },
 
     emptyCart: {
         backgroundColor: "#FFFFFF",
         borderRadius: 14,
-        padding: 28,
+        padding: 24,
         alignItems: "center",
         borderWidth: 1,
         borderColor: "#E3E7EC",
     },
     emptyCartTitle: {
-        fontSize: 16,
+        fontSize: 15,
         fontWeight: "800",
         color: "#172033",
     },
-    emptyCartText: { color: "#7B8492", marginTop: 5 },
+    emptyCartText: { color: "#7B8492", marginTop: 4, fontSize: 12 },
 
     cartItem: {
         backgroundColor: "#FFFFFF",
         borderRadius: 12,
-        padding: 12,
+        padding: 10,
         marginBottom: 8,
         flexDirection: "row",
         alignItems: "center",
@@ -1362,7 +1396,6 @@ const styles = StyleSheet.create({
         letterSpacing: 0.5,
     },
 
-    // My Sales button
     salesButton: {
         flexDirection: "row",
         alignItems: "center",

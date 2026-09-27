@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useRef, useState } from "react";
 import {
     ActivityIndicator,
     Alert,
@@ -23,6 +23,9 @@ type DashboardData = {
     averageSale: number;
 };
 
+const SALES_TAPS_REQUIRED = 5;
+const SALES_TAP_RESET_MS = 2500;
+
 export default function AdminDashboard() {
     const router = useRouter();
     const { user, logout } = useAuth();
@@ -32,6 +35,12 @@ export default function AdminDashboard() {
 
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
+
+    // --- Sales button tap gate ---
+    const salesTapCount = useRef(0);
+    const salesTapTimer = useRef<ReturnType<
+        typeof setTimeout
+    > | null>(null);
 
     const loadDashboard = useCallback(async () => {
         try {
@@ -63,8 +72,6 @@ export default function AdminDashboard() {
             let cancelled = false;
 
             const run = async () => {
-                // Defer so setState isn't called synchronously
-                // within the focus effect callback
                 await Promise.resolve();
                 if (!cancelled) {
                     await loadDashboard();
@@ -87,6 +94,27 @@ export default function AdminDashboard() {
     const handleLogout = async () => {
         await logout();
         router.replace("/");
+    };
+
+    const handleSalesPress = () => {
+        salesTapCount.current += 1;
+
+        // Reset the counter if the user stops tapping
+        if (salesTapTimer.current) {
+            clearTimeout(salesTapTimer.current);
+        }
+
+        if (salesTapCount.current >= SALES_TAPS_REQUIRED) {
+            salesTapCount.current = 0;
+            salesTapTimer.current = null;
+            router.push("/admin/sales");
+            return;
+        }
+
+        salesTapTimer.current = setTimeout(() => {
+            salesTapCount.current = 0;
+            salesTapTimer.current = null;
+        }, SALES_TAP_RESET_MS);
     };
 
     if (loading) {
@@ -165,65 +193,6 @@ export default function AdminDashboard() {
                     </View>
                 </View>
 
-                {/* MAIN STAT */}
-
-                <View style={styles.mainStat}>
-                    <Text style={styles.mainStatLabel}>
-                        TODAY'S SALES
-                    </Text>
-
-                    <Text style={styles.mainStatValue}>
-                        $
-                        {Number(
-                            dashboard?.todaySales || 0
-                        ).toFixed(2)}
-                    </Text>
-
-                    <Text style={styles.mainStatFooter}>
-                        Total sales for today
-                    </Text>
-                </View>
-
-                {/* STAT GRID */}
-
-                <View style={styles.grid}>
-                    <View style={styles.statCard}>
-                        <Text style={styles.statLabel}>
-                            TODAY'S PROFIT
-                        </Text>
-
-                        <Text style={styles.statValue}>
-                            $
-                            {Number(
-                                dashboard?.todayProfit || 0
-                            ).toFixed(2)}
-                        </Text>
-                    </View>
-
-                    <View style={styles.statCard}>
-                        <Text style={styles.statLabel}>
-                            TRANSACTIONS
-                        </Text>
-
-                        <Text style={styles.statValue}>
-                            {dashboard?.transactions || 0}
-                        </Text>
-                    </View>
-
-                    <View style={styles.statCard}>
-                        <Text style={styles.statLabel}>
-                            AVERAGE SALE
-                        </Text>
-
-                        <Text style={styles.statValue}>
-                            $
-                            {Number(
-                                dashboard?.averageSale || 0
-                            ).toFixed(2)}
-                        </Text>
-                    </View>
-                </View>
-
                 {/* MANAGEMENT */}
 
                 <Text style={styles.sectionTitle}>
@@ -275,9 +244,7 @@ export default function AdminDashboard() {
 
                     <Pressable
                         style={styles.menuCard}
-                        onPress={() =>
-                            router.push("/admin/sales")
-                        }
+                        onPress={handleSalesPress}
                     >
                         <View style={styles.menuIcon}>
                             <Text style={styles.menuIconText}>
@@ -402,7 +369,7 @@ const styles = StyleSheet.create({
         padding: 18,
         flexDirection: "row",
         alignItems: "center",
-        marginBottom: 16,
+        marginBottom: 26,
     },
 
     avatar: {
@@ -437,62 +404,6 @@ const styles = StyleSheet.create({
         color: "#8FA1B8",
         fontSize: 11,
         marginTop: 2,
-    },
-
-    mainStat: {
-        backgroundColor: "#1769E0",
-        borderRadius: 16,
-        padding: 22,
-        marginBottom: 14,
-    },
-
-    mainStatLabel: {
-        color: "#CFE0FF",
-        fontSize: 11,
-        fontWeight: "800",
-        letterSpacing: 1,
-    },
-
-    mainStatValue: {
-        color: "#FFFFFF",
-        fontSize: 35,
-        fontWeight: "900",
-        marginTop: 7,
-    },
-
-    mainStatFooter: {
-        color: "#CFE0FF",
-        fontSize: 12,
-        marginTop: 4,
-    },
-
-    grid: {
-        flexDirection: "row",
-        gap: 10,
-        marginBottom: 26,
-    },
-
-    statCard: {
-        flex: 1,
-        backgroundColor: "#FFFFFF",
-        borderRadius: 13,
-        padding: 14,
-        borderWidth: 1,
-        borderColor: "#E1E5EA",
-    },
-
-    statLabel: {
-        color: "#7B8492",
-        fontSize: 9,
-        fontWeight: "800",
-        minHeight: 25,
-    },
-
-    statValue: {
-        color: "#172033",
-        fontSize: 18,
-        fontWeight: "900",
-        marginTop: 5,
     },
 
     sectionTitle: {
