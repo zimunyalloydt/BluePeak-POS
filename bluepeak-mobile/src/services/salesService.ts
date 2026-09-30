@@ -18,6 +18,27 @@ export interface CreateSaleResponse {
     message: string;
 }
 
+export interface ReceiptItem {
+    productName: string;
+    quantity: number;
+    unitPrice: number;
+    total: number;
+}
+
+export interface Receipt {
+    saleId: number;
+    saleDate: string;
+    cashier: string;
+    paymentMethod: string;
+    subtotal: number;
+    vat: number;
+    total: number;
+    amountPaid: number;
+    changeGiven: number;
+    customerName?: string | null;
+    items: ReceiptItem[];
+}
+
 export async function createSale(
     sale: CreateSaleRequest
 ): Promise<CreateSaleResponse> {
@@ -35,8 +56,12 @@ export async function getMySales() {
     return response.data;
 }
 
-export async function getReceipt(saleId: number) {
-    const response = await api.get(`/Sales/${saleId}`);
+export async function getReceipt(
+    saleId: number
+): Promise<Receipt> {
+    const response = await api.get<Receipt>(
+        `/Sales/${saleId}`
+    );
 
     return response.data;
 }

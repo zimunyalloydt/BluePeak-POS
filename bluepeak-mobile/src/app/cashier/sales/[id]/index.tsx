@@ -20,6 +20,7 @@ import {
 } from "../../../../services/cashierSalesService";
 
 import { requestRefund } from "../../../../services/refundService";
+import { printerService } from "../../../../services/printerService";
 
 export default function CashierSaleDetailsScreen() {
     const router = useRouter();
@@ -30,40 +31,21 @@ export default function CashierSaleDetailsScreen() {
 
     const saleId = Number(id);
 
-    const [sale, setSale] =
-        useState<SaleReceipt | null>(null);
-
-    const [loading, setLoading] =
-        useState(true);
-
-    const [submittingRefund, setSubmittingRefund] =
-        useState(false);
-
-    const [showRefundForm, setShowRefundForm] =
-        useState(false);
-
-    const [reason, setReason] =
-        useState("");
-
-    const [notes, setNotes] =
-        useState("");
+    const [sale, setSale] = useState<SaleReceipt | null>(null);
+    const [loading, setLoading] = useState(true);
+    const [submittingRefund, setSubmittingRefund] = useState(false);
+    const [printingReceipt, setPrintingReceipt] = useState(false);
+    const [showRefundForm, setShowRefundForm] = useState(false);
+    const [reason, setReason] = useState("");
+    const [notes, setNotes] = useState("");
 
     const loadSale = useCallback(async () => {
         try {
-            const data =
-                await getSaleReceipt(saleId);
-
+            const data = await getSaleReceipt(saleId);
             setSale(data);
         } catch (error) {
-            console.error(
-                "Failed to load sale:",
-                error
-            );
-
-            Alert.alert(
-                "Error",
-                "Failed to load sale details."
-            );
+            console.error("Failed to load sale:", error);
+            Alert.alert("Error", "Failed to load sale details.");
         } finally {
             setLoading(false);
         }
@@ -72,6 +54,33 @@ export default function CashierSaleDetailsScreen() {
     useEffect(() => {
         loadSale();
     }, [loadSale]);
+
+    const handlePrintReceipt = async () => {
+        if (!sale) {
+            return;
+        }
+
+        try {
+            setPrintingReceipt(true);
+
+            await printerService.printReceipt(sale);
+
+            Alert.alert(
+                "Receipt Printed",
+                `Receipt for Sale #${sale.saleId} was sent to the printer.`
+            );
+        } catch (error: any) {
+            console.error("Failed to print receipt:", error);
+
+            Alert.alert(
+                "Printing Failed",
+                error?.message ||
+                    "Unable to print the receipt. Make sure the RK-E260L printer is switched on and connected."
+            );
+        } finally {
+            setPrintingReceipt(false);
+        }
+    };
 
     const handleRefundRequest = async () => {
         if (!reason.trim()) {
@@ -107,19 +116,13 @@ export default function CashierSaleDetailsScreen() {
                 ]
             );
         } catch (error: any) {
-            console.error(
-                "Failed to request refund:",
-                error
-            );
+            console.error("Failed to request refund:", error);
 
             const message =
                 error?.response?.data?.message ||
                 "Failed to submit refund request.";
 
-            Alert.alert(
-                "Refund Request Failed",
-                message
-            );
+            Alert.alert("Refund Request Failed", message);
         } finally {
             setSubmittingRefund(false);
         }
@@ -127,20 +130,11 @@ export default function CashierSaleDetailsScreen() {
 
     if (loading) {
         return (
-            <SafeAreaView
-                style={styles.container}
-            >
+            <SafeAreaView style={styles.container}>
                 <View style={styles.loading}>
-                    <ActivityIndicator
-                        size="large"
-                        color="#1769E0"
-                    />
+                    <ActivityIndicator size="large" color="#1769E0" />
 
-                    <Text
-                        style={
-                            styles.loadingText
-                        }
-                    >
+                    <Text style={styles.loadingText}>
                         Loading sale...
                     </Text>
                 </View>
@@ -150,9 +144,7 @@ export default function CashierSaleDetailsScreen() {
 
     if (!sale) {
         return (
-            <SafeAreaView
-                style={styles.container}
-            >
+            <SafeAreaView style={styles.container}>
                 <View style={styles.empty}>
                     <Text style={styles.emptyTitle}>
                         Sale not found
@@ -162,11 +154,7 @@ export default function CashierSaleDetailsScreen() {
                         style={styles.backButton}
                         onPress={() => router.back()}
                     >
-                        <Text
-                            style={
-                                styles.backButtonText
-                            }
-                        >
+                        <Text style={styles.backButtonText}>
                             Go Back
                         </Text>
                     </Pressable>
@@ -176,313 +164,173 @@ export default function CashierSaleDetailsScreen() {
     }
 
     return (
-        <SafeAreaView
-            style={styles.container}
-        >
+        <SafeAreaView style={styles.container}>
             <ScrollView
-                contentContainerStyle={
-                    styles.content
-                }
-                showsVerticalScrollIndicator={
-                    false
-                }
+                contentContainerStyle={styles.content}
+                showsVerticalScrollIndicator={false}
             >
                 <Pressable
                     style={styles.backRow}
                     onPress={() => router.back()}
                 >
-                    <Text style={styles.backArrow}>
-                        ‹
-                    </Text>
-
-                    <Text style={styles.backText}>
-                        My Sales
-                    </Text>
+                    <Text style={styles.backArrow}>‹</Text>
+                    <Text style={styles.backText}>My Sales</Text>
                 </Pressable>
 
                 <View style={styles.header}>
                     <View>
-                        <Text
-                            style={
-                                styles.saleTitle
-                            }
-                        >
+                        <Text style={styles.saleTitle}>
                             Sale #{sale.saleId}
                         </Text>
 
-                        <Text
-                            style={
-                                styles.saleDate
-                            }
-                        >
-                            {new Date(
-                                sale.saleDate
-                            ).toLocaleString()}
+                        <Text style={styles.saleDate}>
+                            {new Date(sale.saleDate).toLocaleString()}
                         </Text>
                     </View>
 
-                    <View
-                        style={
-                            styles.completedBadge
-                        }
-                    >
-                        <Text
-                            style={
-                                styles.completedText
-                            }
-                        >
+                    <View style={styles.completedBadge}>
+                        <Text style={styles.completedText}>
                             COMPLETED
                         </Text>
                     </View>
                 </View>
 
+                {/* Items */}
                 <View style={styles.card}>
-                    <Text style={styles.sectionTitle}>
-                        Items
-                    </Text>
+                    <Text style={styles.sectionTitle}>Items</Text>
 
-                    {sale.items.map(
-                        (item, index) => (
-                            <View
-                                key={`${item.productName}-${index}`}
-                                style={
-                                    styles.itemRow
-                                }
-                            >
-                                <View
-                                    style={
-                                        styles.itemInfo
-                                    }
-                                >
-                                    <Text
-                                        style={
-                                            styles.productName
-                                        }
-                                    >
-                                        {
-                                            item.productName
-                                        }
-                                    </Text>
+                    {sale.items.map((item, index) => (
+                        <View
+                            key={`${item.productName}-${index}`}
+                            style={styles.itemRow}
+                        >
+                            <View style={styles.itemInfo}>
+                                <Text style={styles.productName}>
+                                    {item.productName}
+                                </Text>
 
-                                    <Text
-                                        style={
-                                            styles.itemMeta
-                                        }
-                                    >
-                                        {item.quantity} × $
-                                        {Number(
-                                            item.unitPrice
-                                        ).toFixed(2)}
-                                    </Text>
-                                </View>
-
-                                <Text
-                                    style={
-                                        styles.itemTotal
-                                    }
-                                >
-                                    $
-                                    {Number(
-                                        item.total
-                                    ).toFixed(2)}
+                                <Text style={styles.itemMeta}>
+                                    {item.quantity} × $
+                                    {Number(item.unitPrice).toFixed(2)}
                                 </Text>
                             </View>
-                        )
-                    )}
+
+                            <Text style={styles.itemTotal}>
+                                ${Number(item.total).toFixed(2)}
+                            </Text>
+                        </View>
+                    ))}
                 </View>
 
+                {/* Payment */}
                 <View style={styles.card}>
-                    <Text style={styles.sectionTitle}>
-                        Payment
-                    </Text>
+                    <Text style={styles.sectionTitle}>Payment</Text>
 
                     <View style={styles.amountRow}>
-                        <Text
-                            style={
-                                styles.amountLabel
-                            }
-                        >
-                            Subtotal
-                        </Text>
-
-                        <Text
-                            style={
-                                styles.amountValue
-                            }
-                        >
-                            $
-                            {Number(
-                                sale.subtotal
-                            ).toFixed(2)}
+                        <Text style={styles.amountLabel}>Subtotal</Text>
+                        <Text style={styles.amountValue}>
+                            ${Number(sale.subtotal).toFixed(2)}
                         </Text>
                     </View>
 
                     <View style={styles.amountRow}>
-                        <Text
-                            style={
-                                styles.amountLabel
-                            }
-                        >
-                            VAT
-                        </Text>
-
-                        <Text
-                            style={
-                                styles.amountValue
-                            }
-                        >
-                            $
-                            {Number(
-                                sale.vat
-                            ).toFixed(2)}
+                        <Text style={styles.amountLabel}>VAT</Text>
+                        <Text style={styles.amountValue}>
+                            ${Number(sale.vat).toFixed(2)}
                         </Text>
                     </View>
 
-                    <View
-                        style={[
-                            styles.amountRow,
-                            styles.totalRow,
-                        ]}
-                    >
-                        <Text
-                            style={
-                                styles.totalLabel
-                            }
-                        >
-                            Total
-                        </Text>
-
-                        <Text
-                            style={
-                                styles.totalValue
-                            }
-                        >
-                            $
-                            {Number(
-                                sale.total
-                            ).toFixed(2)}
+                    <View style={[styles.amountRow, styles.totalRow]}>
+                        <Text style={styles.totalLabel}>Total</Text>
+                        <Text style={styles.totalValue}>
+                            ${Number(sale.total).toFixed(2)}
                         </Text>
                     </View>
 
                     <View style={styles.divider} />
 
                     <View style={styles.amountRow}>
-                        <Text
-                            style={
-                                styles.amountLabel
-                            }
-                        >
+                        <Text style={styles.amountLabel}>
                             Payment method
                         </Text>
-
-                        <Text
-                            style={
-                                styles.amountValue
-                            }
-                        >
+                        <Text style={styles.amountValue}>
                             {sale.paymentMethod}
                         </Text>
                     </View>
 
                     <View style={styles.amountRow}>
-                        <Text
-                            style={
-                                styles.amountLabel
-                            }
-                        >
+                        <Text style={styles.amountLabel}>
                             Amount paid
                         </Text>
-
-                        <Text
-                            style={
-                                styles.amountValue
-                            }
-                        >
-                            $
-                            {Number(
-                                sale.amountPaid
-                            ).toFixed(2)}
+                        <Text style={styles.amountValue}>
+                            ${Number(sale.amountPaid).toFixed(2)}
                         </Text>
                     </View>
 
                     <View style={styles.amountRow}>
-                        <Text
-                            style={
-                                styles.amountLabel
-                            }
-                        >
-                            Change
-                        </Text>
-
-                        <Text
-                            style={
-                                styles.changeValue
-                            }
-                        >
-                            $
-                            {Number(
-                                sale.changeGiven
-                            ).toFixed(2)}
+                        <Text style={styles.amountLabel}>Change</Text>
+                        <Text style={styles.changeValue}>
+                            ${Number(sale.changeGiven).toFixed(2)}
                         </Text>
                     </View>
                 </View>
 
+                {/* Cashier */}
                 <View style={styles.card}>
-                    <Text style={styles.sectionTitle}>
-                        Cashier
-                    </Text>
-
+                    <Text style={styles.sectionTitle}>Cashier</Text>
                     <Text style={styles.cashierName}>
                         {sale.cashier}
                     </Text>
                 </View>
 
+                {/* Print receipt */}
+                <Pressable
+                    style={[
+                        styles.printButton,
+                        printingReceipt && styles.disabledButton,
+                    ]}
+                    onPress={handlePrintReceipt}
+                    disabled={printingReceipt}
+                >
+                    {printingReceipt ? (
+                        <ActivityIndicator color="#FFFFFF" />
+                    ) : (
+                        <>
+                            <Text style={styles.printButtonIcon}>
+                                🖨️
+                            </Text>
+                            <Text style={styles.printButtonText}>
+                                PRINT RECEIPT
+                            </Text>
+                        </>
+                    )}
+                </Pressable>
+
+                {/* Refund: button OR form */}
                 {!showRefundForm ? (
                     <Pressable
                         style={({ pressed }) => [
                             styles.refundButton,
-                            pressed &&
-                                styles.buttonPressed,
+                            pressed && styles.buttonPressed,
                         ]}
-                        onPress={() =>
-                            setShowRefundForm(true)
-                        }
+                        onPress={() => setShowRefundForm(true)}
                     >
-                        <Text
-                            style={
-                                styles.refundButtonText
-                            }
-                        >
+                        <Text style={styles.refundButtonText}>
                             REQUEST REFUND
                         </Text>
                     </Pressable>
                 ) : (
                     <View style={styles.refundCard}>
-                        <Text
-                            style={
-                                styles.refundTitle
-                            }
-                        >
+                        <Text style={styles.refundTitle}>
                             Request Refund
                         </Text>
 
-                        <Text
-                            style={
-                                styles.refundDescription
-                            }
-                        >
-                            This will send the refund
-                            request to an administrator
-                            for approval.
+                        <Text style={styles.refundDescription}>
+                            This will send the refund request to an
+                            administrator for approval.
                         </Text>
 
-                        <Text
-                            style={
-                                styles.inputLabel
-                            }
-                        >
-                            Reason
-                        </Text>
+                        <Text style={styles.inputLabel}>Reason</Text>
 
                         <TextInput
                             value={reason}
@@ -490,16 +338,10 @@ export default function CashierSaleDetailsScreen() {
                             placeholder="Why is this sale being refunded?"
                             placeholderTextColor="#94A3B8"
                             multiline
-                            style={
-                                styles.textInput
-                            }
+                            style={styles.textInput}
                         />
 
-                        <Text
-                            style={
-                                styles.inputLabel
-                            }
-                        >
+                        <Text style={styles.inputLabel}>
                             Notes (optional)
                         </Text>
 
@@ -509,34 +351,18 @@ export default function CashierSaleDetailsScreen() {
                             placeholder="Additional information..."
                             placeholderTextColor="#94A3B8"
                             multiline
-                            style={
-                                styles.textInput
-                            }
+                            style={styles.textInput}
                         />
 
-                        <View
-                            style={
-                                styles.refundActions
-                            }
-                        >
+                        <View style={styles.refundActions}>
                             <Pressable
-                                style={
-                                    styles.cancelButton
-                                }
+                                style={styles.cancelButton}
                                 onPress={() =>
-                                    setShowRefundForm(
-                                        false
-                                    )
+                                    setShowRefundForm(false)
                                 }
-                                disabled={
-                                    submittingRefund
-                                }
+                                disabled={submittingRefund}
                             >
-                                <Text
-                                    style={
-                                        styles.cancelButtonText
-                                    }
-                                >
+                                <Text style={styles.cancelButtonText}>
                                     CANCEL
                                 </Text>
                             </Pressable>
@@ -547,12 +373,8 @@ export default function CashierSaleDetailsScreen() {
                                     submittingRefund &&
                                         styles.disabledButton,
                                 ]}
-                                onPress={
-                                    handleRefundRequest
-                                }
-                                disabled={
-                                    submittingRefund
-                                }
+                                onPress={handleRefundRequest}
+                                disabled={submittingRefund}
                             >
                                 {submittingRefund ? (
                                     <ActivityIndicator
@@ -873,5 +695,26 @@ const styles = StyleSheet.create({
     backButtonText: {
         color: "#FFFFFF",
         fontWeight: "800",
+    },
+
+    printButton: {
+        backgroundColor: "#1769E0",
+        borderRadius: 14,
+        paddingVertical: 16,
+        alignItems: "center",
+        justifyContent: "center",
+        flexDirection: "row",
+        marginBottom: 14,
+    },
+
+    printButtonIcon: {
+        fontSize: 18,
+        marginRight: 8,
+    },
+
+    printButtonText: {
+        color: "#FFFFFF",
+        fontSize: 14,
+        fontWeight: "900",
     },
 });
