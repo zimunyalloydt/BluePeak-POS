@@ -5,6 +5,7 @@ import React, {
     useRef,
     useState,
 } from "react";
+
 import {
     ActivityIndicator,
     Alert,
@@ -25,6 +26,8 @@ import {
 import { useRouter } from "expo-router";
 
 import TaskAlertModal from "../../components/TaskAlertModal";
+import { useAuth } from "../../context/AuthContext";
+import { printerService } from "../../services/printerService";
 import {
     startNotificationConnection,
     stopNotificationConnection,
@@ -34,12 +37,14 @@ import {
     getMyTasks,
     Task,
 } from "../../services/taskService";
-import { useAuth } from "../../context/AuthContext";
 import {
     getProducts,
     Product,
 } from "../../services/productService";
-import { createSale } from "../../services/salesService";
+import {
+    createSale,
+    getReceipt,
+} from "../../services/salesService";
 
 type CartItem = {
     product: Product;
@@ -57,6 +62,8 @@ export default function CashierScreen() {
 
     const scrollViewRef = useRef<ScrollView>(null);
     const checkoutY = useRef(0);
+    const [printingTest, setPrintingTest] = useState(false);
+const [printerConnected, setPrinterConnected] = useState(false);
 
     const [products, setProducts] = useState<Product[]>([]);
     const [cart, setCart] = useState<CartItem[]>([]);
@@ -92,6 +99,44 @@ export default function CashierScreen() {
         }
     }, []);
 
+
+    const handleTestPrinter = async () => {
+    try {
+        setPrintingTest(true);
+
+        const bluetoothEnabled =
+            await printerService.isBluetoothEnabled();
+
+        if (!bluetoothEnabled) {
+            Alert.alert(
+                "Bluetooth Disabled",
+                "Please turn on Bluetooth and try again."
+            );
+            return;
+        }
+
+        await printerService.testPrint();
+
+        setPrinterConnected(true);
+
+        Alert.alert(
+            "Print Successful",
+            "The BluePeak test receipt was sent to the printer."
+        );
+    } catch (error: any) {
+        console.error("Printer test failed:", error);
+
+        setPrinterConnected(false);
+
+        Alert.alert(
+            "Printer Error",
+            error?.message ||
+                "Unable to connect to the Bluetooth printer."
+        );
+    } finally {
+        setPrintingTest(false);
+    }
+};
     // ---- Tasks ----------------------------------------------------------
 
     const loadTasks = useCallback(async () => {
@@ -363,46 +408,64 @@ export default function CashierScreen() {
 
     // ---- Checkout -------------------------------------------------------
 
-    const completeSale = async () => {
-        if (!user) {
-            Alert.alert("Session Error", "Please log in again.");
-            return;
-        }
+ const completeSale = async () => {
+    if (!user) {
+        Alert.alert("Session Error", "Please log in again.");
+        return;
+    }
 
-        if (cart.length === 0) {
-            Alert.alert("Empty Cart", "Add at least one product.");
-            return;
-        }
+    if (cart.length === 0) {
+        Alert.alert("Empty Cart", "Add at least one product.");
+        return;
+    }
 
-        if (parsedAmountPaid < cartTotal) {
-            Alert.alert(
-                "Insufficient Payment",
-                `Amount paid must be at least $${cartTotal.toFixed(
-                    2
-                )}.`
-            );
-            return;
-        }
+    if (parsedAmountPaid < cartTotal) {
+        Alert.alert(
+            "Insufficient Payment",
+            `Amount paid must be at least $${cartTotal.toFixed(2)}.`
+        );
+        return;
+    }
 
+    try {
+        setProcessingSale(true);
+
+        // 1. Create the sale first
+        const result = await createSale({
+            userId: user.userId,
+            paymentMethod,
+            amountPaid: parsedAmountPaid,
+            customerName: customerName.trim() || undefined,
+            items: cart.map((item) => ({
+                productId: item.product.productId,
+                quantity: item.quantity,
+            })),
+        });
+
+        console.log("✅ SALE CREATED:", result);
+
+        // 2. Get the official receipt from the API
+        const receipt = await getReceipt(result.saleId);
+
+        console.log(
+            "🧾 RECEIPT DATA:",
+            JSON.stringify(receipt, null, 2)
+        );
+
+        // 3. Automatically print the receipt
         try {
-            setProcessingSale(true);
+            console.log("🖨️ Printing receipt...");
 
-            const result = await createSale({
-                userId: user.userId,
-                paymentMethod,
-                amountPaid: parsedAmountPaid,
-                customerName: customerName.trim() || undefined,
-                items: cart.map((item) => ({
-                    productId: item.product.productId,
-                    quantity: item.quantity,
-                })),
-            });
+            await printerService.printReceipt(receipt);
 
+            console.log("✅ Receipt printed successfully.");
+
+            // 4. Sale completed + printed
             Alert.alert(
                 "Sale Complete",
-                `Sale #${result.saleId} completed successfully.\n\nChange: $${change.toFixed(
-                    2
-                )}`,
+                `Sale #${result.saleId} completed successfully.\n\n` +
+                    `Receipt printed.\n\n` +
+                    `Change: $${change.toFixed(2)}`,
                 [
                     {
                         text: "New Sale",
@@ -410,21 +473,55 @@ export default function CashierScreen() {
                             setCart([]);
                             setAmountPaid("");
                             setCustomerName("");
+                            setPaymentMethod("Cash");
                         },
                     },
                 ]
             );
-        } catch (error: any) {
-            console.error("Sale failed:", error);
-            const message =
-                error?.response?.data?.message ||
-                error?.response?.data ||
-                "Failed to complete sale.";
-            Alert.alert("Sale Failed", String(message));
-        } finally {
-            setProcessingSale(false);
+        } catch (printError: any) {
+            // The sale DID succeed, but printing failed.
+            console.error(
+                "❌ Receipt printing failed:",
+                printError
+            );
+
+            Alert.alert(
+                "Sale Complete — Printing Failed",
+                `Sale #${result.saleId} was saved successfully, but the receipt could not be printed.\n\n` +
+                    `You can print the receipt again from My Sales.\n\n` +
+                    `Reason: ${
+                        printError?.message ||
+                        "Unable to connect to the printer."
+                    }`,
+                [
+                    {
+                        text: "New Sale",
+                        onPress: () => {
+                            setCart([]);
+                            setAmountPaid("");
+                            setCustomerName("");
+                            setPaymentMethod("Cash");
+                        },
+                    },
+                ]
+            );
         }
-    };
+    } catch (error: any) {
+        console.error("❌ Sale failed:", error);
+
+        const message =
+            error?.response?.data?.message ||
+            error?.response?.data ||
+            "Failed to complete sale.";
+
+        Alert.alert(
+            "Sale Failed",
+            String(message)
+        );
+    } finally {
+        setProcessingSale(false);
+    }
+};
 
     const handleLogout = async () => {
         await logout();
@@ -875,6 +972,36 @@ export default function CashierScreen() {
                             </View>
                         )}
                     </View>
+<Pressable
+    style={styles.printerButton}
+    onPress={handleTestPrinter}
+    disabled={printingTest}
+>
+    <View style={styles.printerButtonIconContainer}>
+        <Text style={styles.printerButtonIcon}>🖨️</Text>
+    </View>
+
+    <View style={styles.printerButtonContent}>
+        <Text style={styles.printerButtonTitle}>
+            {printingTest
+                ? "Testing Printer..."
+                : "Test Receipt Printer"}
+        </Text>
+
+        <Text style={styles.printerButtonSubtitle}>
+            {printerConnected
+                ? "RK-E260L • Connected"
+                : "Connect to printer001-a3d3"}
+        </Text>
+    </View>
+
+    {printingTest ? (
+        <ActivityIndicator />
+    ) : (
+        <Text style={styles.printerButtonArrow}>→</Text>
+    )}
+</Pressable>
+
 
                     {/* My Sales — always available, not tied to the cart */}
                     <Pressable
@@ -1538,4 +1665,51 @@ const styles = StyleSheet.create({
         fontWeight: "800",
         color: "#FFFFFF",
     },
+
+    printerButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FFFFFF",
+    marginTop: 20,
+    padding: 16,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#D7E3F4",
+},
+
+printerButtonIconContainer: {
+    width: 46,
+    height: 46,
+    borderRadius: 12,
+    backgroundColor: "#EEF4FF",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 14,
+},
+
+printerButtonIcon: {
+    fontSize: 23,
+},
+
+printerButtonContent: {
+    flex: 1,
+},
+
+printerButtonTitle: {
+    fontSize: 16,
+    fontWeight: "900",
+    color: "#0B1F3A",
+},
+
+printerButtonSubtitle: {
+    marginTop: 4,
+    fontSize: 12,
+    color: "#64748B",
+},
+
+printerButtonArrow: {
+    fontSize: 24,
+    fontWeight: "800",
+    color: "#1769E0",
+},
 });
