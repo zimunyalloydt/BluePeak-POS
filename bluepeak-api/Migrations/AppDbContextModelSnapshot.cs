@@ -215,7 +215,7 @@ namespace bluepeak_api.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("varchar(100)");
 
-                    b.Property<int>("CategoryId")
+                    b.Property<int?>("CategoryId")
                         .HasColumnType("int");
 
                     b.Property<decimal>("CostPrice")
@@ -364,6 +364,10 @@ namespace bluepeak_api.Migrations
                     b.Property<decimal>("ChangeGiven")
                         .HasColumnType("decimal(65,30)");
 
+                    b.Property<string>("ClientSaleId")
+                        .IsRequired()
+                        .HasColumnType("varchar(255)");
+
                     b.Property<string>("CustomerName")
                         .HasColumnType("longtext");
 
@@ -387,6 +391,9 @@ namespace bluepeak_api.Migrations
                         .HasColumnType("decimal(65,30)");
 
                     b.HasKey("SaleId");
+
+                    b.HasIndex("ClientSaleId")
+                        .IsUnique();
 
                     b.HasIndex("UserId");
 
@@ -599,13 +606,9 @@ namespace bluepeak_api.Migrations
 
             modelBuilder.Entity("bluepeak_api.Models.Product", b =>
                 {
-                    b.HasOne("bluepeak_api.Models.Category", "Category")
+                    b.HasOne("bluepeak_api.Models.Category", null)
                         .WithMany("Products")
-                        .HasForeignKey("CategoryId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Category");
+                        .HasForeignKey("CategoryId");
                 });
 
             modelBuilder.Entity("bluepeak_api.Models.RefundRequest", b =>

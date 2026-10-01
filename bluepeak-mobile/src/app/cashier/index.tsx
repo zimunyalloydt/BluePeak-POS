@@ -41,6 +41,7 @@ import {
     getProducts,
     Product,
 } from "../../services/productService";
+import { initializeLocalDatabase } from "../../services/localDatabase";
 import {
     createSale,
     getReceipt,
@@ -63,7 +64,7 @@ export default function CashierScreen() {
     const scrollViewRef = useRef<ScrollView>(null);
     const checkoutY = useRef(0);
     const [printingTest, setPrintingTest] = useState(false);
-const [printerConnected, setPrinterConnected] = useState(false);
+    const [printerConnected, setPrinterConnected] = useState(false);
 
     const [products, setProducts] = useState<Product[]>([]);
     const [cart, setCart] = useState<CartItem[]>([]);
@@ -86,57 +87,75 @@ const [printerConnected, setPrinterConnected] = useState(false);
 
     // ---- Products -------------------------------------------------------
 
-    const loadProducts = useCallback(async () => {
-        try {
-            setLoading(true);
-            const data = await getProducts();
-            setProducts(Array.isArray(data) ? data : []);
-        } catch (error) {
-            console.error("Failed to load products:", error);
-            Alert.alert("Error", "Failed to load products.");
-        } finally {
-            setLoading(false);
-        }
-    }, []);
 
 
     const handleTestPrinter = async () => {
-    try {
-        setPrintingTest(true);
+        try {
+            setPrintingTest(true);
 
-        const bluetoothEnabled =
-            await printerService.isBluetoothEnabled();
+            const bluetoothEnabled =
+                await printerService.isBluetoothEnabled();
 
-        if (!bluetoothEnabled) {
+            if (!bluetoothEnabled) {
+                Alert.alert(
+                    "Bluetooth Disabled",
+                    "Please turn on Bluetooth and try again."
+                );
+                return;
+            }
+
+            await printerService.testPrint();
+
+            setPrinterConnected(true);
+
             Alert.alert(
-                "Bluetooth Disabled",
-                "Please turn on Bluetooth and try again."
+                "Print Successful",
+                "The BluePeak test receipt was sent to the printer."
             );
-            return;
+        } catch (error: any) {
+            console.error("Printer test failed:", error);
+
+            setPrinterConnected(false);
+
+            Alert.alert(
+                "Printer Error",
+                error?.message ||
+                    "Unable to connect to the Bluetooth printer."
+            );
+        } finally {
+            setPrintingTest(false);
         }
+    };
 
-        await printerService.testPrint();
 
-        setPrinterConnected(true);
+    const loadProducts = useCallback(async () => {
+    try {
+        setLoading(true);
 
-        Alert.alert(
-            "Print Successful",
-            "The BluePeak test receipt was sent to the printer."
+        await initializeLocalDatabase();
+
+        const data = await getProducts();
+
+        setProducts(
+            Array.isArray(data)
+                ? data
+                : []
         );
     } catch (error: any) {
-        console.error("Printer test failed:", error);
-
-        setPrinterConnected(false);
+        console.error(
+            "Failed to load products:",
+            error
+        );
 
         Alert.alert(
-            "Printer Error",
+            "Products Unavailable",
             error?.message ||
-                "Unable to connect to the Bluetooth printer."
+                "Unable to load products."
         );
     } finally {
-        setPrintingTest(false);
+        setLoading(false);
     }
-};
+}, []);
     // ---- Tasks ----------------------------------------------------------
 
     const loadTasks = useCallback(async () => {
@@ -208,34 +227,9 @@ const [printerConnected, setPrinterConnected] = useState(false);
     // ---- Initial load ---------------------------------------------------
 
     useEffect(() => {
-        let cancelled = false;
-
-        async function load() {
-            try {
-                const data = await getProducts();
-                if (!cancelled) {
-                    setProducts(Array.isArray(data) ? data : []);
-                }
-            } catch (error) {
-                if (!cancelled) {
-                    console.error(
-                        "Failed to load products:",
-                        error
-                    );
-                    Alert.alert("Error", "Failed to load products.");
-                }
-            } finally {
-                if (!cancelled) setLoading(false);
-            }
-        }
-
-        load();
-        loadTasks();
-
-        return () => {
-            cancelled = true;
-        };
-    }, [loadTasks]);
+    loadProducts();
+    loadTasks();
+}, [loadProducts, loadTasks]);
 
     const activeTask = useMemo(
         () =>
@@ -392,30 +386,52 @@ const [printerConnected, setPrinterConnected] = useState(false);
         );
     };
 
-    const cartTotal = useMemo(
-        () =>
-            cart.reduce(
-                (total, item) =>
-                    total +
-                    item.product.sellingPrice * item.quantity,
-                0
-            ),
-        [cart]
-    );
+  const cartSubtotal = useMemo(
+    () =>
+        cart.reduce(
+            (total, item) =>
+                total +
+                item.product.sellingPrice *
+                    item.quantity,
+            0
+        ),
+    [cart]
+);
 
-    const parsedAmountPaid = parseFloat(amountPaid) || 0;
-    const change = parsedAmountPaid - cartTotal;
+const cartVat = cartSubtotal * 0.15;
+
+const cartTotal =
+    cartSubtotal + cartVat;
+
+const parsedAmountPaid =
+    parseFloat(amountPaid) || 0;
+
+const change =
+    parsedAmountPaid - cartTotal;
 
     // ---- Checkout -------------------------------------------------------
 
- const completeSale = async () => {
+    const resetSaleForm = () => {
+        setCart([]);
+        setAmountPaid("");
+        setCustomerName("");
+        setPaymentMethod("Cash");
+    };
+
+const completeSale = async () => {
     if (!user) {
-        Alert.alert("Session Error", "Please log in again.");
+        Alert.alert(
+            "Session Error",
+            "Please log in again."
+        );
         return;
     }
 
     if (cart.length === 0) {
-        Alert.alert("Empty Cart", "Add at least one product.");
+        Alert.alert(
+            "Empty Cart",
+            "Add at least one product."
+        );
         return;
     }
 
@@ -430,56 +446,99 @@ const [printerConnected, setPrinterConnected] = useState(false);
     try {
         setProcessingSale(true);
 
-        // 1. Create the sale first
+        /*
+         * createSale() is now LOCAL-FIRST.
+         *
+         * The sale is saved to SQLite before the
+         * application attempts to contact the server.
+         */
         const result = await createSale({
             userId: user.userId,
             paymentMethod,
             amountPaid: parsedAmountPaid,
-            customerName: customerName.trim() || undefined,
+            customerName:
+                customerName.trim() || undefined,
             items: cart.map((item) => ({
-                productId: item.product.productId,
+                productId:
+                    item.product.productId,
                 quantity: item.quantity,
+                productName:
+                    item.product.productName,
+                unitPrice:
+                    item.product.sellingPrice,
+                costPrice:
+                    item.product.costPrice,
             })),
         });
 
-        console.log("✅ SALE CREATED:", result);
+        console.log(
+            "✅ SALE CREATED:",
+            result
+        );
 
-        // 2. Get the official receipt from the API
-        const receipt = await getReceipt(result.saleId);
+        /*
+         * For an offline sale, getReceipt()
+         * reads the receipt from SQLite.
+         *
+         * For an online sale, it reads the
+         * official server receipt.
+         */
+        const receipt =
+            await getReceipt(result.saleId);
 
         console.log(
             "🧾 RECEIPT DATA:",
-            JSON.stringify(receipt, null, 2)
+            JSON.stringify(
+                receipt,
+                null,
+                2
+            )
         );
 
-        // 3. Automatically print the receipt
+        /*
+         * Print the receipt.
+         *
+         * This must work whether the server
+         * was available or not.
+         */
         try {
-            console.log("🖨️ Printing receipt...");
+            console.log(
+                "🖨️ Printing receipt..."
+            );
 
-            await printerService.printReceipt(receipt);
+            await printerService.printReceipt(
+                receipt
+            );
 
-            console.log("✅ Receipt printed successfully.");
+            console.log(
+                "✅ Receipt printed successfully."
+            );
 
-            // 4. Sale completed + printed
+            const saleMessage =
+                result.offline
+                    ? "Sale saved on this device.\nIt will automatically sync when the server is available."
+                    : `Sale #${result.saleId} completed successfully.`;
+
             Alert.alert(
-                "Sale Complete",
-                `Sale #${result.saleId} completed successfully.\n\n` +
-                    `Receipt printed.\n\n` +
-                    `Change: $${change.toFixed(2)}`,
+                result.offline
+                    ? "Sale Saved Offline"
+                    : "Sale Complete",
+                saleMessage +
+                    "\n\nReceipt printed." +
+                    `\n\nChange: $${change.toFixed(2)}`,
                 [
                     {
                         text: "New Sale",
-                        onPress: () => {
-                            setCart([]);
-                            setAmountPaid("");
-                            setCustomerName("");
-                            setPaymentMethod("Cash");
-                        },
+                        onPress:
+                            resetSaleForm,
                     },
                 ]
             );
         } catch (printError: any) {
-            // The sale DID succeed, but printing failed.
+            /*
+             * The sale is already saved.
+             * A printer failure must not cancel it.
+             */
             console.error(
                 "❌ Receipt printing failed:",
                 printError
@@ -487,31 +546,31 @@ const [printerConnected, setPrinterConnected] = useState(false);
 
             Alert.alert(
                 "Sale Complete — Printing Failed",
-                `Sale #${result.saleId} was saved successfully, but the receipt could not be printed.\n\n` +
-                    `You can print the receipt again from My Sales.\n\n` +
-                    `Reason: ${
+                `Sale #${result.saleId} was saved successfully, but the receipt could not be printed.` +
+                    "\n\nYou can print the receipt again from My Sales." +
+                    `\n\nReason: ${
                         printError?.message ||
                         "Unable to connect to the printer."
                     }`,
                 [
                     {
                         text: "New Sale",
-                        onPress: () => {
-                            setCart([]);
-                            setAmountPaid("");
-                            setCustomerName("");
-                            setPaymentMethod("Cash");
-                        },
+                        onPress:
+                            resetSaleForm,
                     },
                 ]
             );
         }
     } catch (error: any) {
-        console.error("❌ Sale failed:", error);
+        console.error(
+            "❌ Sale failed:",
+            error
+        );
 
         const message =
             error?.response?.data?.message ||
             error?.response?.data ||
+            error?.message ||
             "Failed to complete sale.";
 
         Alert.alert(
@@ -844,16 +903,36 @@ const [printerConnected, setPrinterConnected] = useState(false);
                                 }}
                             >
                                 <View style={styles.totalRow}>
-                                    <Text
-                                        style={styles.totalLabel}
-                                    >
-                                        TOTAL
-                                    </Text>
-                                    <Text
-                                        style={styles.totalValue}
-                                    >
-                                        ${cartTotal.toFixed(2)}
-                                    </Text>
+                                   
+                                   <View style={styles.totalRow}>
+    <Text style={styles.totalLabel}>
+        SUBTOTAL
+    </Text>
+
+    <Text style={styles.totalValue}>
+        ${cartSubtotal.toFixed(2)}
+    </Text>
+</View>
+
+<View style={styles.totalRow}>
+    <Text style={styles.totalLabel}>
+        VAT (15%)
+    </Text>
+
+    <Text style={styles.totalValue}>
+        ${cartVat.toFixed(2)}
+    </Text>
+</View>
+
+<View style={styles.totalRow}>
+    <Text style={styles.totalLabel}>
+        TOTAL
+    </Text>
+
+    <Text style={styles.totalValue}>
+        ${cartTotal.toFixed(2)}
+    </Text>
+</View>
                                 </View>
 
                                 <TextInput
@@ -972,41 +1051,65 @@ const [printerConnected, setPrinterConnected] = useState(false);
                             </View>
                         )}
                     </View>
-<Pressable
-    style={styles.printerButton}
-    onPress={handleTestPrinter}
-    disabled={printingTest}
->
-    <View style={styles.printerButtonIconContainer}>
-        <Text style={styles.printerButtonIcon}>🖨️</Text>
-    </View>
 
-    <View style={styles.printerButtonContent}>
-        <Text style={styles.printerButtonTitle}>
-            {printingTest
-                ? "Testing Printer..."
-                : "Test Receipt Printer"}
-        </Text>
+                    <Pressable
+                        style={styles.printerButton}
+                        onPress={handleTestPrinter}
+                        disabled={printingTest}
+                    >
+                        <View
+                            style={
+                                styles.printerButtonIconContainer
+                            }
+                        >
+                            <Text
+                                style={styles.printerButtonIcon}
+                            >
+                                🖨️
+                            </Text>
+                        </View>
 
-        <Text style={styles.printerButtonSubtitle}>
-            {printerConnected
-                ? "RK-E260L • Connected"
-                : "Connect to printer001-a3d3"}
-        </Text>
-    </View>
+                        <View
+                            style={styles.printerButtonContent}
+                        >
+                            <Text
+                                style={styles.printerButtonTitle}
+                            >
+                                {printingTest
+                                    ? "Testing Printer..."
+                                    : "Test Receipt Printer"}
+                            </Text>
 
-    {printingTest ? (
-        <ActivityIndicator />
-    ) : (
-        <Text style={styles.printerButtonArrow}>→</Text>
-    )}
-</Pressable>
+                            <Text
+                                style={
+                                    styles.printerButtonSubtitle
+                                }
+                            >
+                                {printerConnected
+                                    ? "RK-E260L • Connected"
+                                    : "Connect to printer001-a3d3"}
+                            </Text>
+                        </View>
 
+                        {printingTest ? (
+                            <ActivityIndicator />
+                        ) : (
+                            <Text
+                                style={
+                                    styles.printerButtonArrow
+                                }
+                            >
+                                →
+                            </Text>
+                        )}
+                    </Pressable>
 
-                    {/* My Sales — always available, not tied to the cart */}
+                    {/* My Sales */}
                     <Pressable
                         style={styles.salesButton}
-                        onPress={() => router.push("/cashier/sales")}
+                        onPress={() =>
+                            router.push("/cashier/sales")
+                        }
                     >
                         <Text style={styles.salesButtonIcon}>
                             🧾
@@ -1044,7 +1147,9 @@ const [printerConnected, setPrinterConnected] = useState(false);
                 <KeyboardAvoidingView
                     style={styles.modalOverlay}
                     behavior={
-                        Platform.OS === "ios" ? "padding" : undefined
+                        Platform.OS === "ios"
+                            ? "padding"
+                            : undefined
                     }
                 >
                     <View style={styles.quantityModal}>
@@ -1190,7 +1295,7 @@ const [printerConnected, setPrinterConnected] = useState(false);
                 </KeyboardAvoidingView>
             </Modal>
 
-            {/* Task alert modal — rendered last so it overlays everything */}
+            {/* Task alert modal */}
             <TaskAlertModal
                 task={activeTask}
                 visible={activeTask !== null}
@@ -1667,49 +1772,49 @@ const styles = StyleSheet.create({
     },
 
     printerButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#FFFFFF",
-    marginTop: 20,
-    padding: 16,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: "#D7E3F4",
-},
+        flexDirection: "row",
+        alignItems: "center",
+        backgroundColor: "#FFFFFF",
+        marginTop: 20,
+        padding: 16,
+        borderRadius: 16,
+        borderWidth: 1,
+        borderColor: "#D7E3F4",
+    },
 
-printerButtonIconContainer: {
-    width: 46,
-    height: 46,
-    borderRadius: 12,
-    backgroundColor: "#EEF4FF",
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: 14,
-},
+    printerButtonIconContainer: {
+        width: 46,
+        height: 46,
+        borderRadius: 12,
+        backgroundColor: "#EEF4FF",
+        alignItems: "center",
+        justifyContent: "center",
+        marginRight: 14,
+    },
 
-printerButtonIcon: {
-    fontSize: 23,
-},
+    printerButtonIcon: {
+        fontSize: 23,
+    },
 
-printerButtonContent: {
-    flex: 1,
-},
+    printerButtonContent: {
+        flex: 1,
+    },
 
-printerButtonTitle: {
-    fontSize: 16,
-    fontWeight: "900",
-    color: "#0B1F3A",
-},
+    printerButtonTitle: {
+        fontSize: 16,
+        fontWeight: "900",
+        color: "#0B1F3A",
+    },
 
-printerButtonSubtitle: {
-    marginTop: 4,
-    fontSize: 12,
-    color: "#64748B",
-},
+    printerButtonSubtitle: {
+        marginTop: 4,
+        fontSize: 12,
+        color: "#64748B",
+    },
 
-printerButtonArrow: {
-    fontSize: 24,
-    fontWeight: "800",
-    color: "#1769E0",
-},
+    printerButtonArrow: {
+        fontSize: 24,
+        fontWeight: "800",
+        color: "#1769E0",
+    },
 });

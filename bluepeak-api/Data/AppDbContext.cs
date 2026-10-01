@@ -37,6 +37,10 @@ public DbSet<Notification> Notifications => Set<Notification>();
     {
         base.OnModelCreating(modelBuilder);
 
+        modelBuilder.Entity<Sale>()
+    .HasIndex(s => s.ClientSaleId)
+    .IsUnique();
+
         modelBuilder.Entity<RefundRequest>()
     .HasOne(r => r.Sale)
     .WithMany()
