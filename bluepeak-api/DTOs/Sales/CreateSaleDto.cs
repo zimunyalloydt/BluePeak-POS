@@ -2,6 +2,8 @@ namespace bluepeak_api.DTOs.Sales;
 
 public class CreateSaleDto
 {
+    public string ClientSaleId { get; set; } = string.Empty;
+
     public int UserId { get; set; }
 
     public string PaymentMethod { get; set; } = "Cash";

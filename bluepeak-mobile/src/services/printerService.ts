@@ -36,7 +36,7 @@ interface BluetoothManagerNative {
 
   connect(address: string): Promise<void>;
   disconnect(address: string): Promise<void>;
-  unpair(address: string): Promise<string>;
+  unpaire(address: string): Promise<string>;
 
   isDeviceConnected(): Promise<boolean>;
   getConnectedDeviceAddress(): Promise<string | null>;
@@ -216,6 +216,64 @@ function parseScanResult(
   }
 
   return result;
+}
+
+/**
+ * Format money for the receipt.
+ */
+function formatMoney(value: number): string {
+  const amount = Number(value) || 0;
+
+  return amount.toFixed(2);
+}
+
+/**
+ * Format quantities without unnecessary decimals.
+ */
+function formatNumber(value: number): string {
+  const number = Number(value) || 0;
+
+  if (Number.isInteger(number)) {
+    return String(number);
+  }
+
+  return number.toFixed(2);
+}
+
+/**
+ * Format receipt date.
+ */
+function formatDate(value: string): string {
+  if (!value) {
+    return "";
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return date.toLocaleString();
+}
+
+/**
+ * Keep product names within the width of
+ * an 80mm thermal receipt.
+ */
+function truncate(
+  value: string,
+  maxLength: number
+): string {
+  if (!value) {
+    return "";
+  }
+
+  if (value.length <= maxLength) {
+    return value;
+  }
+
+  return `${value.substring(0, maxLength - 3)}...`;
 }
 
 export const printerService = {
@@ -414,7 +472,7 @@ export const printerService = {
     await printer.printerAlign(1);
 
     await printer.printText(
-      "BLUEPEAK POS\n\r",
+      "BLUEPEAK POS\n",
       {
         widthtimes: 2,
         heigthtimes: 2,
@@ -422,42 +480,52 @@ export const printerService = {
     );
 
     await printer.printText(
-      "PRINTER TEST\n\r\n\r",
+      "PRINTER TEST\n\n",
       {}
     );
 
     await printer.printerAlign(0);
 
     await printer.printText(
-      "--------------------------------\n\r",
+      "--------------------------------\n",
       {}
     );
 
     await printer.printText(
-      "Printer: RK-E260L\n\r",
+      "Printer: RK-E260L\n",
       {}
     );
 
     await printer.printText(
-      "Bluetooth: printer001-a3d3\n\r",
+      "Bluetooth: printer001-a3d3\n",
       {}
     );
 
     await printer.printText(
-      "Status: Connected\n\r",
+      "Status: Connected\n",
       {}
     );
 
     await printer.printText(
-      "--------------------------------\n\r",
+      "--------------------------------\n",
       {}
     );
 
     await printer.printerAlign(1);
 
     await printer.printText(
-      "Bluetooth printing works!\n\r\n\r\n\r",
+      "Bluetooth printing works!\n\n",
       {}
+    );
+
+    /**
+     * Feed the paper so the last line clears the cutter blade
+     * before the cut fires.
+     */
+    await printer.printText("\n\n\n\n\n", {});
+
+    await new Promise((resolve) =>
+      setTimeout(resolve, 1500)
     );
 
     try {
@@ -469,13 +537,14 @@ export const printerService = {
       );
     }
 
-    console.log(
-      "✅ Printer test completed."
-    );
+    console.log("✅ Printer test completed.");
   },
 
+/**
   /**
-   * Print a complete BluePeak POS receipt.
+   * Print a complete Coldstone Trading POS receipt.
+   *
+   * Layout based on the provided 80mm receipt photo.
    */
   async printReceipt(receipt: {
     saleId: number;
@@ -496,20 +565,18 @@ export const printerService = {
       total: number;
     }[];
   }): Promise<void> {
-    const { printer } =
-      validateNativeModules();
+    const { printer } = validateNativeModules();
 
     console.log(
-      "🧾 Printing receipt:",
+      "🧾 Printing Coldstone receipt:",
       receipt.saleId
     );
 
     try {
       /**
-       * Make sure the printer is connected.
+       * Make sure printer is connected.
        */
-      const connected =
-        await this.isConnected();
+      const connected = await this.isConnected();
 
       if (!connected) {
         console.log(
@@ -525,20 +592,134 @@ export const printerService = {
       await printer.printerInit();
 
       /**
-       * Header.
+       * RK-E260L / 80mm receipt width.
+       *
+       * 48 characters is a safe normal-font width.
        */
+      const WIDTH = 48;
+
+      const line = "-".repeat(WIDTH);
+
+      /**
+       * Format receipt date similar to the sample:
+       *
+       * 4/13/2026 17:51
+       */
+      const formatReceiptDate = (
+        value: string
+      ): string => {
+        if (!value) {
+          return "";
+        }
+
+        const date = new Date(value);
+
+        if (Number.isNaN(date.getTime())) {
+          return value;
+        }
+
+        const month = date.getMonth() + 1;
+        const day = date.getDate();
+        const year = date.getFullYear();
+
+        const hours = String(
+          date.getHours()
+        ).padStart(2, "0");
+
+        const minutes = String(
+          date.getMinutes()
+        ).padStart(2, "0");
+
+        return `${month}/${day}/${year} ${hours}:${minutes}`;
+      };
+
+      /**
+       * Right-align an amount against a label.
+       */
+      const amountLine = (
+        label: string,
+        value: number
+      ): string => {
+        const amount = formatMoney(value);
+
+        const spaces =
+          WIDTH -
+          label.length -
+          amount.length;
+
+        return (
+          label +
+          " ".repeat(
+            Math.max(1, spaces)
+          ) +
+          amount +
+          "\n"
+        );
+      };
+
+      /**
+       * Create an item table row.
+       *
+       * Product       Price   Qty       Total
+       */
+      const itemHeader =
+        "Product".padEnd(27) +
+        "Price".padStart(7) +
+        "Qty".padStart(5) +
+        "Total".padStart(9) +
+        "\n";
+
+      /**
+       * Item row:
+       *
+       * Product name is limited to 27 characters
+       * so the numbers cannot run off the paper.
+       */
+      const itemRow = (
+        productName: string,
+        unitPrice: number,
+        quantity: number,
+        total: number
+      ): string => {
+        const name = truncate(
+          productName,
+          27
+        ).padEnd(27);
+
+        const price =
+          formatMoney(unitPrice).padStart(7);
+
+        const qty =
+          formatNumber(quantity).padStart(5);
+
+        const totalAmount =
+          formatMoney(total).padStart(9);
+
+        return (
+          name +
+          price +
+          qty +
+          totalAmount +
+          "\n"
+        );
+      };
+
+      /* =====================================================
+         HEADER
+      ===================================================== */
+
       await printer.printerAlign(1);
 
       await printer.printText(
-        "BLUEPEAK POS\n\r",
+        "COLDSTONE TRADING\n",
         {
           widthtimes: 2,
-          heigthtimes: 2,
+          heigthtimes: 1,
         }
       );
 
       await printer.printText(
-        "SALES RECEIPT\n\r",
+        "(PRIVATE) LIMITED\n",
         {
           widthtimes: 1,
           heigthtimes: 1,
@@ -546,143 +727,205 @@ export const printerService = {
       );
 
       await printer.printText(
-        "\n\r",
+        "2 STIRLING ROAD\n",
         {}
       );
 
-      /**
-       * Receipt information.
-       */
+      await printer.printText(
+        "HARARE\n",
+        {}
+      );
+
+      await printer.printText(
+        "\n",
+        {}
+      );
+
+      /* =====================================================
+         INVOICE / DATE
+      ===================================================== */
+
       await printer.printerAlign(0);
 
       await printer.printText(
-        "--------------------------------\n\r",
+        `Invoice: ${receipt.saleId}\n`,
         {}
       );
 
       await printer.printText(
-        `Receipt: #${receipt.saleId}\n\r`,
+        `${formatReceiptDate(receipt.saleDate)}\n`,
         {}
       );
 
       await printer.printText(
-        `Date: ${formatDate(receipt.saleDate)}\n\r`,
+        line + "\n",
+        {}
+      );
+
+      /* =====================================================
+         ITEMS HEADER
+      ===================================================== */
+
+      await printer.printText(
+        itemHeader,
         {}
       );
 
       await printer.printText(
-        `Cashier: ${receipt.cashier}\n\r`,
+        line + "\n",
         {}
       );
 
-      if (receipt.customerName) {
-        await printer.printText(
-          `Customer: ${receipt.customerName}\n\r`,
-          {}
-        );
-      }
+      /* =====================================================
+         ITEMS
+      ===================================================== */
 
-      await printer.printText(
-        `Payment: ${receipt.paymentMethod}\n\r`,
-        {}
-      );
-
-      await printer.printText(
-        "--------------------------------\n\r",
-        {}
-      );
-
-      /**
-       * Items.
-       */
       for (const item of receipt.items) {
-        const name =
-          truncate(item.productName, 18);
-
-        const quantity =
-          formatNumber(item.quantity);
-
-        const unitPrice =
-          formatMoney(item.unitPrice);
-
-        const total =
-          formatMoney(item.total);
-
         await printer.printText(
-          `${name}\n\r`,
-          {}
-        );
-
-        await printer.printText(
-          `  ${quantity} x ${unitPrice}     ${total}\n\r`,
+          itemRow(
+            item.productName,
+            item.unitPrice,
+            item.quantity,
+            item.total
+          ),
           {}
         );
       }
 
+      /* =====================================================
+         GROSS TOTAL
+      ===================================================== */
+
       await printer.printText(
-        "--------------------------------\n\r",
+        line + "\n",
         {}
       );
 
       /**
-       * Totals.
+       * Total quantity.
        */
+      const totalQuantity =
+        receipt.items.reduce(
+          (sum, item) =>
+            sum + Number(item.quantity || 0),
+          0
+        );
+
       await printer.printText(
-        `Subtotal:              ${formatMoney(
-          receipt.subtotal
-        )}\n\r`,
+        "Gross Total:".padStart(35) +
+          String(totalQuantity).padStart(5) +
+          " " +
+          formatMoney(receipt.subtotal).padStart(7) +
+          "\n",
         {}
       );
 
       await printer.printText(
-        `VAT:                   ${formatMoney(
-          receipt.vat
-        )}\n\r`,
+        line + "\n",
         {}
       );
 
+      /* =====================================================
+         TOTALS
+      ===================================================== */
+
       await printer.printText(
-        `TOTAL:                 ${formatMoney(
+        amountLine(
+          "Net Total:",
           receipt.total
-        )}\n\r`,
-        {
-          widthtimes: 1,
-          heigthtimes: 1,
-        }
+        ),
+        {}
       );
 
       await printer.printText(
-        `Amount Paid:           ${formatMoney(
+        amountLine(
+          "USD paid:",
           receipt.amountPaid
-        )}\n\r`,
-        {}
-      );
-
-      await printer.printText(
-        `Change:                ${formatMoney(
-          receipt.changeGiven
-        )}\n\r`,
-        {}
-      );
-
-      await printer.printText(
-        "--------------------------------\n\r",
+        ),
         {}
       );
 
       /**
-       * Footer.
+       * Positive change = customer paid more.
+       * Negative value = amount still owing.
        */
+      if (receipt.changeGiven >= 0) {
+        await printer.printText(
+          amountLine(
+            "Balance:",
+            receipt.changeGiven
+          ),
+          {}
+        );
+      } else {
+        await printer.printText(
+          amountLine(
+            "Balance Due:",
+            Math.abs(receipt.changeGiven)
+          ),
+          {}
+        );
+      }
+
+      /* =====================================================
+         CASHIER
+      ===================================================== */
+
+      await printer.printText(
+        line + "\n",
+        {}
+      );
+
+      await printer.printText(
+        `Sales Person: ${receipt.cashier}\n`,
+        {}
+      );
+
+      /* =====================================================
+         FOOTER
+      ===================================================== */
+
+      await printer.printText(
+        line + "\n",
+        {}
+      );
+
       await printer.printerAlign(1);
 
       await printer.printText(
-        "Thank you for your purchase!\n\r",
+        "Thank you for shopping with us\n",
         {}
       );
 
       await printer.printText(
-        "Powered by BluePeak POS\n\r\n\r\n\r",
+        "Please come back soon\n",
         {}
+      );
+
+      /* =====================================================
+         EXTRA BLANK SPACE (TEAR-OFF MARGIN)
+      ===================================================== */
+
+      /**
+       * Feed a generous amount of blank lines after the
+       * footer so the receipt can be torn off cleanly
+       * without ripping through the "Thank you" message.
+       *
+       * 8 blank lines ≈ 25mm on a typical 80mm printer.
+       * Increase this number if your printer still cuts
+       * or tears too close to the footer text.
+       */
+      await printer.printText(
+        "\n\n\n\n\n\n\n\n",
+        {}
+      );
+
+      /**
+       * Allow physical paper movement to finish
+       * before firing the cutter.
+       */
+      await new Promise((resolve) =>
+        setTimeout(resolve, 2000)
       );
 
       /**
@@ -690,6 +933,10 @@ export const printerService = {
        */
       try {
         await printer.cutPaper();
+
+        console.log(
+          "✂️ Receipt paper cut successfully."
+        );
       } catch (error) {
         console.log(
           "⚠️ Paper cutter not available:",
@@ -698,7 +945,7 @@ export const printerService = {
       }
 
       console.log(
-        "✅ Receipt printed successfully."
+        "✅ Coldstone receipt printed successfully."
       );
     } catch (error) {
       console.error(
@@ -710,70 +957,3 @@ export const printerService = {
     }
   },
 };
-
-/**
- * Format money for the receipt.
- */
-function formatMoney(
-  value: number
-): string {
-  const amount = Number(value) || 0;
-
-  return amount.toFixed(2);
-}
-
-/**
- * Format quantities without unnecessary decimals.
- */
-function formatNumber(
-  value: number
-): string {
-  const number = Number(value) || 0;
-
-  if (Number.isInteger(number)) {
-    return String(number);
-  }
-
-  return number.toFixed(2);
-}
-
-/**
- * Format receipt date.
- */
-function formatDate(
-  value: string
-): string {
-  if (!value) {
-    return "";
-  }
-
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-
-  return date.toLocaleString();
-}
-
-/**
- * Keep product names within the width of
- * an 80mm thermal receipt.
- */
-function truncate(
-  value: string,
-  maxLength: number
-): string {
-  if (!value) {
-    return "";
-  }
-
-  if (value.length <= maxLength) {
-    return value;
-  }
-
-  return `${value.substring(
-    0,
-    maxLength - 3
-  )}...`;
-}

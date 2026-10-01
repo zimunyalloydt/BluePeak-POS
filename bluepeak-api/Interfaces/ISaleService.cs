@@ -5,6 +5,7 @@ namespace bluepeak_api.Interfaces;
 public interface ISaleService
 {
     Task<int> ProcessSaleAsync(CreateSaleDto dto, int userId);
+    
 
     Task<List<SaleHistoryDto>> GetMySalesAsync(int userId);
 
