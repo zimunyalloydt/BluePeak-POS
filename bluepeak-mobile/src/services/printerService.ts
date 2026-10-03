@@ -168,8 +168,15 @@ async function requestBluetoothPermissions(): Promise<boolean> {
           PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT
         ] === PermissionsAndroid.RESULTS.GRANTED;
 
-      console.log("🔐 Bluetooth SCAN permission:", scanGranted);
-      console.log("🔐 Bluetooth CONNECT permission:", connectGranted);
+      console.log(
+        "🔐 Bluetooth SCAN permission:",
+        scanGranted
+      );
+
+      console.log(
+        "🔐 Bluetooth CONNECT permission:",
+        connectGranted
+      );
 
       return scanGranted && connectGranted;
     }
@@ -184,7 +191,10 @@ async function requestBluetoothPermissions(): Promise<boolean> {
     const granted =
       result === PermissionsAndroid.RESULTS.GRANTED;
 
-    console.log("🔐 Location permission:", granted);
+    console.log(
+      "🔐 Location permission:",
+      granted
+    );
 
     return granted;
   } catch (error) {
@@ -312,7 +322,9 @@ export const printerService = {
       );
     }
 
-    console.log("🔍 Scanning Bluetooth devices...");
+    console.log(
+      "🔍 Scanning Bluetooth devices..."
+    );
 
     const result = await manager.scanDevices();
 
@@ -398,7 +410,9 @@ export const printerService = {
 
     await manager.connect(printer.address);
 
-    console.log("✅ Printer connected.");
+    console.log(
+      "✅ Printer connected."
+    );
 
     return printer;
   },
@@ -445,7 +459,9 @@ export const printerService = {
 
       await manager.disconnect(address);
 
-      console.log("✅ Printer disconnected.");
+      console.log(
+        "✅ Printer disconnected."
+      );
     }
   },
 
@@ -455,7 +471,9 @@ export const printerService = {
   async testPrint(): Promise<void> {
     const { printer } = validateNativeModules();
 
-    console.log("🖨️ Starting printer test...");
+    console.log(
+      "🖨️ Starting printer test..."
+    );
 
     const connected =
       await this.isConnected();
@@ -464,6 +482,9 @@ export const printerService = {
       await this.connect();
     }
 
+    /**
+     * Initialize printer before printing.
+     */
     await printer.printerInit();
 
     /**
@@ -519,17 +540,34 @@ export const printerService = {
     );
 
     /**
-     * Feed the paper so the last line clears the cutter blade
-     * before the cut fires.
+     * Feed the paper sufficiently far beyond
+     * the print head so the cutter can reach
+     * the blank section.
+     *
+     * The RK-E260L cutter is approximately
+     * 10–15mm below the print head.
+     *
+     * Use plain \n. Do not use \n\r.
      */
-    await printer.printText("\n\n\n\n\n", {});
+    await printer.printText(
+      "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n",
+      {}
+    );
 
+    /**
+     * Allow the paper feed to physically finish
+     * before firing the cutter.
+     */
     await new Promise((resolve) =>
-      setTimeout(resolve, 1500)
+      setTimeout(resolve, 2000)
     );
 
     try {
       await printer.cutPaper();
+
+      console.log(
+        "✂️ Test paper cut successfully."
+      );
     } catch (error) {
       console.log(
         "⚠️ Paper cutter not available:",
@@ -537,10 +575,11 @@ export const printerService = {
       );
     }
 
-    console.log("✅ Printer test completed.");
+    console.log(
+      "✅ Printer test completed."
+    );
   },
 
-/**
   /**
    * Print a complete Coldstone Trading POS receipt.
    *
@@ -576,7 +615,8 @@ export const printerService = {
       /**
        * Make sure printer is connected.
        */
-      const connected = await this.isConnected();
+      const connected =
+        await this.isConnected();
 
       if (!connected) {
         console.log(
@@ -587,7 +627,7 @@ export const printerService = {
       }
 
       /**
-       * Initialize printer.
+       * Initialize printer before printing.
        */
       await printer.printerInit();
 
@@ -601,7 +641,7 @@ export const printerService = {
       const line = "-".repeat(WIDTH);
 
       /**
-       * Format receipt date similar to the sample:
+       * Format receipt date:
        *
        * 4/13/2026 17:51
        */
@@ -618,17 +658,24 @@ export const printerService = {
           return value;
         }
 
-        const month = date.getMonth() + 1;
-        const day = date.getDate();
-        const year = date.getFullYear();
+        const month =
+          date.getMonth() + 1;
 
-        const hours = String(
-          date.getHours()
-        ).padStart(2, "0");
+        const day =
+          date.getDate();
 
-        const minutes = String(
-          date.getMinutes()
-        ).padStart(2, "0");
+        const year =
+          date.getFullYear();
+
+        const hours =
+          String(
+            date.getHours()
+          ).padStart(2, "0");
+
+        const minutes =
+          String(
+            date.getMinutes()
+          ).padStart(2, "0");
 
         return `${month}/${day}/${year} ${hours}:${minutes}`;
       };
@@ -640,7 +687,8 @@ export const printerService = {
         label: string,
         value: number
       ): string => {
-        const amount = formatMoney(value);
+        const amount =
+          formatMoney(value);
 
         const spaces =
           WIDTH -
@@ -658,7 +706,7 @@ export const printerService = {
       };
 
       /**
-       * Create an item table row.
+       * Create an item table header.
        *
        * Product       Price   Qty       Total
        */
@@ -670,10 +718,7 @@ export const printerService = {
         "\n";
 
       /**
-       * Item row:
-       *
-       * Product name is limited to 27 characters
-       * so the numbers cannot run off the paper.
+       * Create an item table row.
        */
       const itemRow = (
         productName: string,
@@ -681,19 +726,26 @@ export const printerService = {
         quantity: number,
         total: number
       ): string => {
-        const name = truncate(
-          productName,
-          27
-        ).padEnd(27);
+        const name =
+          truncate(
+            productName,
+            27
+          ).padEnd(27);
 
         const price =
-          formatMoney(unitPrice).padStart(7);
+          formatMoney(
+            unitPrice
+          ).padStart(7);
 
         const qty =
-          formatNumber(quantity).padStart(5);
+          formatNumber(
+            quantity
+          ).padStart(5);
 
         const totalAmount =
-          formatMoney(total).padStart(9);
+          formatMoney(
+            total
+          ).padStart(9);
 
         return (
           name +
@@ -753,7 +805,9 @@ export const printerService = {
       );
 
       await printer.printText(
-        `${formatReceiptDate(receipt.saleDate)}\n`,
+        `${formatReceiptDate(
+          receipt.saleDate
+        )}\n`,
         {}
       );
 
@@ -807,15 +861,22 @@ export const printerService = {
       const totalQuantity =
         receipt.items.reduce(
           (sum, item) =>
-            sum + Number(item.quantity || 0),
+            sum +
+            Number(
+              item.quantity || 0
+            ),
           0
         );
 
       await printer.printText(
         "Gross Total:".padStart(35) +
-          String(totalQuantity).padStart(5) +
+          String(
+            totalQuantity
+          ).padStart(5) +
           " " +
-          formatMoney(receipt.subtotal).padStart(7) +
+          formatMoney(
+            receipt.subtotal
+          ).padStart(7) +
           "\n",
         {}
       );
@@ -849,7 +910,9 @@ export const printerService = {
        * Positive change = customer paid more.
        * Negative value = amount still owing.
        */
-      if (receipt.changeGiven >= 0) {
+      if (
+        receipt.changeGiven >= 0
+      ) {
         await printer.printText(
           amountLine(
             "Balance:",
@@ -861,7 +924,9 @@ export const printerService = {
         await printer.printText(
           amountLine(
             "Balance Due:",
-            Math.abs(receipt.changeGiven)
+            Math.abs(
+              receipt.changeGiven
+            )
           ),
           {}
         );
@@ -893,7 +958,7 @@ export const printerService = {
       await printer.printerAlign(1);
 
       await printer.printText(
-        "Thank you for shopping with us\n",
+        "Thank you for shopping with us pamhata penyu mese\n",
         {}
       );
 
@@ -903,20 +968,25 @@ export const printerService = {
       );
 
       /* =====================================================
-         EXTRA BLANK SPACE (TEAR-OFF MARGIN)
+         EXTRA BLANK SPACE / CUTTER FEED
       ===================================================== */
 
       /**
-       * Feed a generous amount of blank lines after the
-       * footer so the receipt can be torn off cleanly
-       * without ripping through the "Thank you" message.
+       * Feed enough paper after the footer so that
+       * the final printed line moves beyond the cutter
+       * position.
        *
-       * 8 blank lines ≈ 25mm on a typical 80mm printer.
-       * Increase this number if your printer still cuts
-       * or tears too close to the footer text.
+       * The RK-E260L cutter sits approximately
+       * 10–15mm below the print head.
+       *
+       * 15 line feeds provides a generous safety margin.
+       *
+       * IMPORTANT:
+       * Use plain \n only.
+       * Do not use \n\r with this library.
        */
       await printer.printText(
-        "\n\n\n\n\n\n\n\n",
+        "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n",
         {}
       );
 
@@ -930,6 +1000,9 @@ export const printerService = {
 
       /**
        * Cut paper.
+       *
+       * The native package sends the printer's
+       * ESC/POS cut command (GS V 1).
        */
       try {
         await printer.cutPaper();

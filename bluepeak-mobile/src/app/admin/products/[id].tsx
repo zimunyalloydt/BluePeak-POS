@@ -17,9 +17,9 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
 
 import api from "../../../services/api";
-import { getProduct } from "../../../services/productService";
+import { getProduct,addStock,removeStock } from "../../../services/productService";
 
-const API_SERVER = "http://192.168.0.217:5160";
+const API_SERVER = "http://192.168.0.120:5160";
 
 type Product = {
     productId: number;
@@ -41,7 +41,14 @@ export default function AdminProductDetails() {
     const [product, setProduct] = useState<Product | null>(null);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
+const [stockAdjusting, setStockAdjusting] =
+    useState(false);
 
+const [stockQuantity, setStockQuantity] =
+    useState("");
+
+const [stockReason, setStockReason] =
+    useState("");
     const [productName, setProductName] = useState("");
     const [barcode, setBarcode] = useState("");
     const [sellingPrice, setSellingPrice] = useState("");
@@ -140,6 +147,136 @@ export default function AdminProductDetails() {
         }
     };
 
+    const handleAddStock = async () => {
+    if (!product) return;
+
+    const quantity = Number(stockQuantity);
+
+    if (
+        !Number.isInteger(quantity) ||
+        quantity <= 0
+    ) {
+        Alert.alert(
+            "Invalid Quantity",
+            "Enter a whole number greater than zero."
+        );
+        return;
+    }
+
+    try {
+        setStockAdjusting(true);
+
+        const updated = await addStock(
+            product.productId,
+            quantity,
+            stockReason.trim() || undefined
+        );
+
+        setProduct(updated);
+
+        setQuantityInStock(
+            String(updated.quantityInStock ?? 0)
+        );
+
+        setStockQuantity("");
+        setStockReason("");
+
+        Alert.alert(
+            "Stock Added",
+            `${quantity} unit(s) added successfully.\n\n` +
+            `New stock: ${
+                updated.quantityInStock ?? 0
+            }`
+        );
+    } catch (error: any) {
+        console.error(
+            "Add stock failed:",
+            error?.response?.data || error
+        );
+
+        const message =
+            error?.response?.data?.message ||
+            "Failed to add stock.";
+
+        Alert.alert(
+            "Stock Adjustment Failed",
+            String(message)
+        );
+    } finally {
+        setStockAdjusting(false);
+    }
+};
+
+const handleRemoveStock = async () => {
+    if (!product) return;
+
+    const quantity = Number(stockQuantity);
+
+    if (
+        !Number.isInteger(quantity) ||
+        quantity <= 0
+    ) {
+        Alert.alert(
+            "Invalid Quantity",
+            "Enter a whole number greater than zero."
+        );
+        return;
+    }
+
+    const currentStock =
+        product.quantityInStock ?? 0;
+
+    if (quantity > currentStock) {
+        Alert.alert(
+            "Insufficient Stock",
+            `Only ${currentStock} unit(s) are currently in stock.`
+        );
+        return;
+    }
+
+    try {
+        setStockAdjusting(true);
+
+        const updated = await removeStock(
+            product.productId,
+            quantity,
+            stockReason.trim() || undefined
+        );
+
+        setProduct(updated);
+
+        setQuantityInStock(
+            String(updated.quantityInStock ?? 0)
+        );
+
+        setStockQuantity("");
+        setStockReason("");
+
+        Alert.alert(
+            "Stock Removed",
+            `${quantity} unit(s) removed successfully.\n\n` +
+            `Remaining stock: ${
+                updated.quantityInStock ?? 0
+            }`
+        );
+    } catch (error: any) {
+        console.error(
+            "Remove stock failed:",
+            error?.response?.data || error
+        );
+
+        const message =
+            error?.response?.data?.message ||
+            "Failed to remove stock.";
+
+        Alert.alert(
+            "Stock Adjustment Failed",
+            String(message)
+        );
+    } finally {
+        setStockAdjusting(false);
+    }
+};
     const saveProduct = async () => {
         if (!product) {
             return;
@@ -155,7 +292,7 @@ export default function AdminProductDetails() {
 
         const selling = Number(sellingPrice);
         const cost = Number(costPrice);
-        const stock = Number(quantityInStock);
+     
 
         if (Number.isNaN(selling) || selling < 0) {
             Alert.alert(
@@ -173,17 +310,6 @@ export default function AdminProductDetails() {
             return;
         }
 
-        if (
-            Number.isNaN(stock) ||
-            stock < 0 ||
-            !Number.isInteger(stock)
-        ) {
-            Alert.alert(
-                "Validation",
-                "Stock must be a whole number."
-            );
-            return;
-        }
 
         try {
             setSaving(true);
@@ -210,10 +336,7 @@ export default function AdminProductDetails() {
                 String(cost)
             );
 
-            formData.append(
-                "QuantityInStock",
-                String(stock)
-            );
+           
 
             formData.append(
                 "IsActive",
@@ -530,19 +653,92 @@ export default function AdminProductDetails() {
                         Inventory
                     </Text>
 
-                    <Text style={styles.label}>
-                        Quantity in Stock
-                    </Text>
+                   <View style={styles.stockDisplay}>
+    <Text style={styles.stockDisplayLabel}>
+        Current Stock
+    </Text>
 
-                    <TextInput
-                        style={styles.input}
-                        value={quantityInStock}
-                        onChangeText={
-                            setQuantityInStock
-                        }
-                        placeholder="0"
-                        keyboardType="number-pad"
-                    />
+    <Text
+        style={[
+            styles.stockDisplayValue,
+            (product.quantityInStock ?? 0) === 0 &&
+                styles.stockOutValue,
+        ]}
+    >
+        {product.quantityInStock ?? 0}
+    </Text>
+
+    <Text
+        style={[
+            styles.stockStatus,
+            (product.quantityInStock ?? 0) === 0 &&
+                styles.stockOutStatus,
+        ]}
+    >
+        {(product.quantityInStock ?? 0) === 0
+            ? "OUT OF STOCK"
+            : "IN STOCK"}
+    </Text>
+</View>
+
+<Text style={styles.label}>
+    Adjustment Quantity
+</Text>
+
+<TextInput
+    style={styles.input}
+    value={stockQuantity}
+    onChangeText={setStockQuantity}
+    placeholder="Enter quantity"
+    keyboardType="number-pad"
+    editable={!stockAdjusting}
+/>
+
+<Text style={styles.label}>
+    Reason
+</Text>
+
+<TextInput
+    style={[
+        styles.input,
+        styles.reasonInput,
+    ]}
+    value={stockReason}
+    onChangeText={setStockReason}
+    placeholder="e.g. New delivery, damaged goods"
+    multiline
+    editable={!stockAdjusting}
+/>
+
+<View style={styles.stockActions}>
+    <Pressable
+        style={[
+            styles.addStockButton,
+            stockAdjusting &&
+                styles.disabledButton,
+        ]}
+        onPress={handleAddStock}
+        disabled={stockAdjusting}
+    >
+        <Text style={styles.stockButtonText}>
+            + Add Stock
+        </Text>
+    </Pressable>
+
+    <Pressable
+        style={[
+            styles.removeStockButton,
+            stockAdjusting &&
+                styles.disabledButton,
+        ]}
+        onPress={handleRemoveStock}
+        disabled={stockAdjusting}
+    >
+        <Text style={styles.removeStockButtonText}>
+            − Remove Stock
+        </Text>
+    </Pressable>
+</View>
 
                     <View style={styles.statusRow}>
                         <View>
@@ -841,4 +1037,86 @@ const styles = StyleSheet.create({
         color: "#fff",
         fontWeight: "700",
     },
+    stockDisplay: {
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    borderRadius: 14,
+    padding: 18,
+    alignItems: "center",
+    marginBottom: 8,
+},
+
+stockDisplayLabel: {
+    color: "#64748B",
+    fontSize: 12,
+    fontWeight: "700",
+},
+
+stockDisplayValue: {
+    color: "#166534",
+    fontSize: 36,
+    fontWeight: "900",
+    marginTop: 4,
+},
+
+stockOutValue: {
+    color: "#DC2626",
+},
+
+stockStatus: {
+    marginTop: 3,
+    color: "#16A34A",
+    fontSize: 11,
+    fontWeight: "900",
+    letterSpacing: 1,
+},
+
+stockOutStatus: {
+    color: "#DC2626",
+},
+
+reasonInput: {
+    minHeight: 80,
+    paddingTop: 13,
+    textAlignVertical: "top",
+},
+
+stockActions: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 14,
+},
+
+addStockButton: {
+    flex: 1,
+    minHeight: 50,
+    borderRadius: 11,
+    backgroundColor: "#16A34A",
+    alignItems: "center",
+    justifyContent: "center",
+},
+
+removeStockButton: {
+    flex: 1,
+    minHeight: 50,
+    borderRadius: 11,
+    backgroundColor: "#FEF2F2",
+    borderWidth: 1,
+    borderColor: "#DC2626",
+    alignItems: "center",
+    justifyContent: "center",
+},
+
+stockButtonText: {
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: "800",
+},
+
+removeStockButtonText: {
+    color: "#DC2626",
+    fontSize: 14,
+    fontWeight: "800",
+},
 });

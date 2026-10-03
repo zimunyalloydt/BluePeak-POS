@@ -104,6 +104,32 @@ public class RefundsController : ControllerBase
         }
     }
 
+    [HttpGet("{id:int}")]
+[Authorize(Roles = "Admin")]
+public async Task<IActionResult> GetDetails(int id)
+{
+    var refund =
+        await _refundService.GetDetailsAsync(id);
+
+    if (refund == null)
+        return NotFound(new
+        {
+            Message = "Refund request not found."
+        });
+
+    return Ok(refund);
+}
+
+[HttpGet("history")]
+[Authorize(Roles = "Admin")]
+public async Task<IActionResult> GetHistory()
+{
+    var refunds =
+        await _refundService.GetHistoryAsync();
+
+    return Ok(refunds);
+}
+
     [HttpPut("{id:int}/reject")]
     [Authorize(Roles = "Admin")]
     public async Task<IActionResult> Reject(int id)
@@ -136,4 +162,40 @@ public class RefundsController : ControllerBase
             });
         }
     }
+
+    [HttpGet("sale/{saleId:int}")]
+public async Task<IActionResult> GetBySaleId(int saleId)
+{
+    var claim =
+        User.FindFirst(ClaimTypes.NameIdentifier);
+
+    if (claim == null)
+        return Unauthorized();
+
+    if (!int.TryParse(claim.Value, out var userId))
+        return Unauthorized();
+
+    try
+    {
+        var refund =
+            await _refundService.GetBySaleIdAsync(
+                saleId,
+                userId);
+
+        if (refund == null)
+        {
+            return NotFound(new
+            {
+                Message =
+                    "No refund request exists for this sale."
+            });
+        }
+
+        return Ok(refund);
+    }
+    catch (UnauthorizedAccessException)
+    {
+        return Forbid();
+    }
+}
 }

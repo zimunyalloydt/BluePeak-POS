@@ -1,5 +1,5 @@
 import api from "./api";
-import { getDatabase } from "./localDatabase";
+import { getDatabase , rejectLocalSale,} from "./localDatabase";
 
 interface LocalSale {
     localSaleId: string;
@@ -219,17 +219,43 @@ async function syncOneSale(
 
             serverSaleId,
         };
-    } catch (error: any) {
+       } catch (error: any) {
+        const status =
+            error?.response?.status;
+
         const message =
             error?.response?.data?.message ||
             error?.response?.data ||
             error?.message ||
             "Unknown synchronization error.";
 
-        await markSyncFailed(
-            sale.localSaleId,
-            String(message)
-        );
+        /*
+         * 4xx responses are permanent business/request
+         * failures. Do not keep retrying them.
+         *
+         * The local sale already deducted cached stock,
+         * so rejectedLocalSale() restores that stock.
+         */
+        if (
+            status &&
+            status >= 400 &&
+            status < 500
+        ) {
+            await rejectLocalSale(
+                sale.localSaleId,
+                String(message)
+            );
+        } else {
+            /*
+             * Network errors and server errors remain
+             * retryable. Keep the local stock deducted
+             * because the sale may still be synchronized.
+             */
+            await markSyncFailed(
+                sale.localSaleId,
+                String(message)
+            );
+        }
 
         return {
             localSaleId:

@@ -27,7 +27,9 @@ public class ProductService : IProductService
             SellingPrice = x.SellingPrice,
             CostPrice = x.CostPrice,
             Profit = x.SellingPrice - x.CostPrice,
-            
+            QuantityInStock = x.QuantityInStock,
+
+IsActive = x.IsActive,
             ImageUrl = x.ImageUrl
         });
     }
@@ -74,7 +76,9 @@ public class ProductService : IProductService
             SellingPrice = x.SellingPrice,
             CostPrice = x.CostPrice,
             Profit = x.SellingPrice - x.CostPrice,
-           
+           QuantityInStock = x.QuantityInStock,
+
+IsActive = x.IsActive,
             ImageUrl = x.ImageUrl
         });
     }
@@ -164,6 +168,89 @@ else
         return true;
     }
 
+public async Task<ProductDto?> AddStockAsync(
+    int productId,
+    StockAdjustmentDto dto)
+{
+    if (dto.Quantity <= 0)
+        throw new ArgumentException(
+            "Quantity must be greater than zero.");
+
+    var product =
+        await _repository.GetByProductIdAsync(productId);
+
+    if (product == null)
+        return null;
+
+    product.QuantityInStock += dto.Quantity;
+
+    _repository.Update(product);
+
+    await _repository.SaveChangesAsync();
+
+    return new ProductDto
+    {
+        ProductId = product.ProductId,
+        ProductCode = product.ProductCode,
+        ProductName = product.ProductName,
+        Barcode = product.Barcode,
+        SellingPrice = product.SellingPrice,
+        CostPrice = product.CostPrice,
+        Profit =
+            product.SellingPrice -
+            product.CostPrice,
+        QuantityInStock =
+            product.QuantityInStock,
+        IsActive = product.IsActive,
+        ImageUrl = product.ImageUrl
+    };
+}
+
+public async Task<ProductDto?> RemoveStockAsync(
+    int productId,
+    StockAdjustmentDto dto)
+{
+    if (dto.Quantity <= 0)
+        throw new ArgumentException(
+            "Quantity must be greater than zero.");
+
+    var product =
+        await _repository.GetByProductIdAsync(productId);
+
+    if (product == null)
+        return null;
+
+    if (product.QuantityInStock < dto.Quantity)
+    {
+        throw new InvalidOperationException(
+            $"Cannot remove {dto.Quantity} unit(s). " +
+            $"Only {product.QuantityInStock} unit(s) " +
+            $"are currently in stock.");
+    }
+
+    product.QuantityInStock -= dto.Quantity;
+
+    _repository.Update(product);
+
+    await _repository.SaveChangesAsync();
+
+    return new ProductDto
+    {
+        ProductId = product.ProductId,
+        ProductCode = product.ProductCode,
+        ProductName = product.ProductName,
+        Barcode = product.Barcode,
+        SellingPrice = product.SellingPrice,
+        CostPrice = product.CostPrice,
+        Profit =
+            product.SellingPrice -
+            product.CostPrice,
+        QuantityInStock =
+            product.QuantityInStock,
+        IsActive = product.IsActive,
+        ImageUrl = product.ImageUrl
+    };
+}
     public async Task<bool> DeleteAsync(int id)
     {
         var product = await _repository.GetByProductIdAsync(id);

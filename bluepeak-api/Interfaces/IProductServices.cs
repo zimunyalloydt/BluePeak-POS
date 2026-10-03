@@ -14,5 +14,12 @@ public interface IProductService
 
     Task<bool> UpdateAsync(int id, UpdateProductDto dto);
 
+Task<ProductDto?> AddStockAsync(
+    int productId,
+    StockAdjustmentDto dto);
+
+Task<ProductDto?> RemoveStockAsync(
+    int productId,
+    StockAdjustmentDto dto);
     Task<bool> DeleteAsync(int id);
 }

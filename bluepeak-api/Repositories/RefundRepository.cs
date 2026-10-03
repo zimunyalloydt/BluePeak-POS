@@ -43,6 +43,35 @@ public class RefundRepository : IRefundRepository
             .FirstOrDefaultAsync(r =>
                 r.RefundRequestId == id);
     }
+    public async Task<RefundRequest?> GetDetailsAsync(int id)
+{
+    return await _context.RefundRequests
+        .Include(r => r.Sale)
+            .ThenInclude(s => s!.Items)
+                .ThenInclude(i => i.Product)
+        .Include(r => r.RequestedByUser)
+        .Include(r => r.ApprovedByUser)
+        .FirstOrDefaultAsync(r =>
+            r.RefundRequestId == id);
+}
+public async Task<List<Refund>> GetHistoryAsync()
+{
+    return await _context.Refunds
+        .Include(r => r.RefundRequest)
+            .ThenInclude(rr => rr!.RequestedByUser)
+        .Include(r => r.ProcessedByUser)
+        .Include(r => r.Sale)
+        .OrderByDescending(r => r.CreatedAt)
+        .ToListAsync();
+}
+public async Task<RefundRequest?> GetBySaleIdAsync(int saleId)
+{
+    return await _context.RefundRequests
+        .Include(r => r.Sale)
+        .Include(r => r.RequestedByUser)
+        .FirstOrDefaultAsync(r =>
+            r.SaleId == saleId);
+}
 
     public async Task SaveChangesAsync()
     {
