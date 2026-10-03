@@ -253,6 +253,77 @@ namespace bluepeak_api.Migrations
                     b.ToTable("Products");
                 });
 
+            modelBuilder.Entity("bluepeak_api.Models.Refund", b =>
+                {
+                    b.Property<int>("RefundId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("RefundId"));
+
+                    b.Property<decimal>("Amount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<int>("ProcessedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("RefundRequestId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("SaleId")
+                        .HasColumnType("int");
+
+                    b.HasKey("RefundId");
+
+                    b.HasIndex("ProcessedByUserId");
+
+                    b.HasIndex("RefundRequestId");
+
+                    b.HasIndex("SaleId");
+
+                    b.ToTable("Refunds");
+                });
+
+            modelBuilder.Entity("bluepeak_api.Models.RefundItem", b =>
+                {
+                    b.Property<int>("RefundItemId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("RefundItemId"));
+
+                    b.Property<int>("ProductId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Quantity")
+                        .HasColumnType("int");
+
+                    b.Property<int>("RefundId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("SaleItemId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("Total")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal>("UnitPrice")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.HasKey("RefundItemId");
+
+                    b.HasIndex("ProductId");
+
+                    b.HasIndex("RefundId");
+
+                    b.HasIndex("SaleItemId");
+
+                    b.ToTable("RefundItems");
+                });
+
             modelBuilder.Entity("bluepeak_api.Models.RefundRequest", b =>
                 {
                     b.Property<int>("RefundRequestId")
@@ -611,6 +682,60 @@ namespace bluepeak_api.Migrations
                         .HasForeignKey("CategoryId");
                 });
 
+            modelBuilder.Entity("bluepeak_api.Models.Refund", b =>
+                {
+                    b.HasOne("bluepeak_api.Models.User", "ProcessedByUser")
+                        .WithMany()
+                        .HasForeignKey("ProcessedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("bluepeak_api.Models.RefundRequest", "RefundRequest")
+                        .WithMany()
+                        .HasForeignKey("RefundRequestId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("bluepeak_api.Models.Sale", "Sale")
+                        .WithMany()
+                        .HasForeignKey("SaleId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("ProcessedByUser");
+
+                    b.Navigation("RefundRequest");
+
+                    b.Navigation("Sale");
+                });
+
+            modelBuilder.Entity("bluepeak_api.Models.RefundItem", b =>
+                {
+                    b.HasOne("bluepeak_api.Models.Product", "Product")
+                        .WithMany()
+                        .HasForeignKey("ProductId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("bluepeak_api.Models.Refund", "Refund")
+                        .WithMany("Items")
+                        .HasForeignKey("RefundId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("bluepeak_api.Models.SaleItem", "SaleItem")
+                        .WithMany()
+                        .HasForeignKey("SaleItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Product");
+
+                    b.Navigation("Refund");
+
+                    b.Navigation("SaleItem");
+                });
+
             modelBuilder.Entity("bluepeak_api.Models.RefundRequest", b =>
                 {
                     b.HasOne("bluepeak_api.Models.User", "ApprovedByUser")
@@ -735,6 +860,11 @@ namespace bluepeak_api.Migrations
             modelBuilder.Entity("bluepeak_api.Models.Permission", b =>
                 {
                     b.Navigation("UserPermissions");
+                });
+
+            modelBuilder.Entity("bluepeak_api.Models.Refund", b =>
+                {
+                    b.Navigation("Items");
                 });
 
             modelBuilder.Entity("bluepeak_api.Models.Role", b =>

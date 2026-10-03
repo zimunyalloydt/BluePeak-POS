@@ -85,13 +85,26 @@ public class SaleService : ISaleService
                     $"Product {item.ProductId} not found.");
             }
 
-            /* 
-            if (product.QuantityInStock < item.Quantity)
-                throw new Exception(
-                    $"{product.ProductName} is out of stock.");
-            */
+          if (item.Quantity <= 0)
+{
+    throw new ArgumentException(
+        $"Invalid quantity for {product.ProductName}.");
+}
 
-            product.QuantityInStock -= item.Quantity;
+if (product.QuantityInStock <= 0)
+{
+    throw new InvalidOperationException(
+        $"{product.ProductName} is out of stock.");
+}
+
+if (product.QuantityInStock < item.Quantity)
+{
+    throw new InvalidOperationException(
+        $"Only {product.QuantityInStock} unit(s) of " +
+        $"{product.ProductName} are available.");
+}
+
+product.QuantityInStock -= item.Quantity;
 
             decimal total =
                 product.SellingPrice * item.Quantity;

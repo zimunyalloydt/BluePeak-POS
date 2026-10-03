@@ -25,11 +25,20 @@ export async function getProducts(): Promise<Product[]> {
             ? response.data
             : [];
 
-        if (products.length > 0) {
+               if (products.length > 0) {
             await saveProductsLocally(products);
         }
 
-        return products;
+        /*
+         * Return the locally reconciled products.
+         *
+         * This ensures the cashier sees stock after
+         * accounting for pending/failed offline sales.
+         */
+        const localProducts =
+            await getLocalProducts();
+
+        return localProducts;
     } catch (error) {
         console.warn(
             "⚠️ Server unavailable. Loading cached products."
@@ -71,6 +80,38 @@ export async function getProduct(
 ): Promise<Product> {
     const response = await api.get<Product>(
         `/Product/${productId}`
+    );
+
+    return response.data;
+}
+
+export async function addStock(
+    productId: number,
+    quantity: number,
+    reason?: string
+): Promise<Product> {
+    const response = await api.post<Product>(
+        `/Product/${productId}/stock/add`,
+        {
+            quantity,
+            reason,
+        }
+    );
+
+    return response.data;
+}
+
+export async function removeStock(
+    productId: number,
+    quantity: number,
+    reason?: string
+): Promise<Product> {
+    const response = await api.post<Product>(
+        `/Product/${productId}/stock/remove`,
+        {
+            quantity,
+            reason,
+        }
     );
 
     return response.data;

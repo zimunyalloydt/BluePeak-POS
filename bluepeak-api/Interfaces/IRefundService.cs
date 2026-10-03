@@ -15,6 +15,13 @@ public interface IRefundService
         int refundId,
         int adminUserId
     );
+    Task<RefundDetailsDto?> GetDetailsAsync(int refundRequestId);
+
+Task<RefundRequestDto?> GetBySaleIdAsync(
+    int saleId,
+    int userId
+);
+Task<List<RefundHistoryDto>> GetHistoryAsync();
 
     Task RejectAsync(
         int refundId,

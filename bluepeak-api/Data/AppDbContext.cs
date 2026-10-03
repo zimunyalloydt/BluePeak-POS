@@ -31,7 +31,8 @@ public DbSet<TaskAssignment> TaskAssignments => Set<TaskAssignment>();
 
 public DbSet<Notification> Notifications => Set<Notification>();
 
-
+public DbSet<Refund> Refunds => Set<Refund>();
+public DbSet<RefundItem> RefundItems => Set<RefundItem>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -82,6 +83,42 @@ new Permission { PermissionId = 9, Name = "Void Sale", Description = "Can void a
 new Permission { PermissionId = 10, Name = "Apply Discount", Description = "Can apply discounts" }
 
 );
+
+modelBuilder.Entity<Refund>()
+    .HasOne(r => r.RefundRequest)
+    .WithMany()
+    .HasForeignKey(r => r.RefundRequestId)
+    .OnDelete(DeleteBehavior.Restrict);
+
+modelBuilder.Entity<Refund>()
+    .HasOne(r => r.Sale)
+    .WithMany()
+    .HasForeignKey(r => r.SaleId)
+    .OnDelete(DeleteBehavior.Restrict);
+
+modelBuilder.Entity<Refund>()
+    .HasOne(r => r.ProcessedByUser)
+    .WithMany()
+    .HasForeignKey(r => r.ProcessedByUserId)
+    .OnDelete(DeleteBehavior.Restrict);
+
+modelBuilder.Entity<RefundItem>()
+    .HasOne(r => r.Refund)
+    .WithMany(r => r.Items)
+    .HasForeignKey(r => r.RefundId)
+    .OnDelete(DeleteBehavior.Cascade);
+
+modelBuilder.Entity<RefundItem>()
+    .HasOne(r => r.SaleItem)
+    .WithMany()
+    .HasForeignKey(r => r.SaleItemId)
+    .OnDelete(DeleteBehavior.Restrict);
+
+modelBuilder.Entity<RefundItem>()
+    .HasOne(r => r.Product)
+    .WithMany()
+    .HasForeignKey(r => r.ProductId)
+    .OnDelete(DeleteBehavior.Restrict);
 
 modelBuilder.Entity<UserPermission>()
     .HasOne(x => x.User)

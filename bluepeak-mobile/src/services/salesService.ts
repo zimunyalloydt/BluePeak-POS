@@ -1,6 +1,6 @@
 import api from "./api";
 import {
-    getDatabase,
+    getDatabase,rejectLocalSale,
 } from "./localDatabase";
 
 export interface SaleItem {
@@ -410,11 +410,30 @@ export async function createSale(
         const status =
             error?.response?.status;
 
-        if (
+               if (
             status &&
             status >= 400 &&
             status < 500
         ) {
+            const message =
+                error?.response?.data?.message ||
+                error?.response?.data ||
+                error?.message ||
+                "Sale was rejected by the server.";
+
+            /*
+             * The sale was already saved locally and
+             * cached stock was already deducted.
+             *
+             * Since the server permanently rejected
+             * this sale, restore the local stock and
+             * prevent the sale from being retried.
+             */
+            await rejectLocalSale(
+                localSaleId,
+                String(message)
+            );
+
             throw error;
         }
 

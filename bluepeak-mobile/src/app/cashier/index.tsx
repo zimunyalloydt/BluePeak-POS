@@ -294,44 +294,103 @@ export default function CashierScreen() {
 
     // ---- Cart -----------------------------------------------------------
 
-    const addToCart = (product: Product, quantity: number) => {
-        if (quantity <= 0) return;
+  const addToCart = (product: Product, quantity: number) => {
+    if (quantity <= 0) return;
 
-        setCart((currentCart) => {
-            const existing = currentCart.find(
-                (item) =>
-                    item.product.productId === product.productId
+    const availableStock = product.quantityInStock ?? 0;
+
+    if (availableStock <= 0) {
+        Alert.alert(
+            "Out of Stock",
+            `${product.productName} has no stock available to sell.`
+        );
+        return;
+    }
+
+    setCart((currentCart) => {
+        const existing = currentCart.find(
+            (item) =>
+                item.product.productId === product.productId
+        );
+
+        const currentQuantity = existing?.quantity ?? 0;
+        const requestedTotal = currentQuantity + quantity;
+
+        if (requestedTotal > availableStock) {
+            Alert.alert(
+                "Insufficient Stock",
+                `${product.productName} has only ${availableStock} unit(s) available.\n\nAlready in cart: ${currentQuantity}\nRequested: ${quantity}`
             );
 
-            if (existing) {
-                return currentCart.map((item) =>
-                    item.product.productId === product.productId
-                        ? {
-                              ...item,
-                              quantity: item.quantity + quantity,
-                          }
-                        : item
-                );
-            }
+            return currentCart;
+        }
 
-            return [...currentCart, { product, quantity }];
-        });
+        if (existing) {
+            return currentCart.map((item) =>
+                item.product.productId === product.productId
+                    ? {
+                          ...item,
+                          quantity: requestedTotal,
+                      }
+                    : item
+            );
+        }
 
-        setQuantityModalVisible(false);
-        setSelectedProduct(null);
-        setQuantityInput("1");
-    };
+        return [
+            ...currentCart,
+            {
+                product,
+                quantity,
+            },
+        ];
+    });
 
-    const openQuantityModal = (product: Product) => {
-        setSelectedProduct(product);
-        setQuantityInput("1");
-        setQuantityModalVisible(true);
-    };
+    setQuantityModalVisible(false);
+    setSelectedProduct(null);
+};
 
-    const increaseModalQuantity = () => {
-        const current = Number(quantityInput) || 0;
-        setQuantityInput(String(current + 1));
-    };
+   const openQuantityModal = (product: Product) => {
+    const stock = product.quantityInStock ?? 0;
+
+    if (stock <= 0) {
+        Alert.alert(
+            "Out of Stock",
+            `${product.productName} has no stock available to sell.`
+        );
+        return;
+    }
+
+    setSelectedProduct(product);
+    setQuantityInput("1");
+    setQuantityModalVisible(true);
+};
+
+   const increaseModalQuantity = () => {
+    if (!selectedProduct) return;
+
+    const current = Number(quantityInput) || 0;
+    const availableStock =
+        selectedProduct.quantityInStock ?? 0;
+
+    const existingCartItem = cart.find(
+        (item) =>
+            item.product.productId ===
+            selectedProduct.productId
+    );
+
+    const alreadyInCart =
+        existingCartItem?.quantity ?? 0;
+
+    if (alreadyInCart + current >= availableStock) {
+        Alert.alert(
+            "Stock Limit Reached",
+            `Only ${availableStock} unit(s) of ${selectedProduct.productName} are available.`
+        );
+        return;
+    }
+
+    setQuantityInput(String(current + 1));
+};
 
     const decreaseModalQuantity = () => {
         const current = Number(quantityInput) || 1;
@@ -340,21 +399,49 @@ export default function CashierScreen() {
         }
     };
 
-    const confirmQuantity = () => {
-        if (!selectedProduct) return;
+ const confirmQuantity = () => {
+    if (!selectedProduct) return;
 
-        const quantity = Number(quantityInput);
+    const quantity = Number(quantityInput);
 
-        if (!Number.isInteger(quantity) || quantity <= 0) {
-            Alert.alert(
-                "Invalid Quantity",
-                "Please enter a valid quantity."
-            );
-            return;
-        }
+    if (!Number.isInteger(quantity) || quantity <= 0) {
+        Alert.alert(
+            "Invalid Quantity",
+            "Please enter a valid quantity."
+        );
+        return;
+    }
 
-        addToCart(selectedProduct, quantity);
-    };
+    const availableStock =
+        selectedProduct.quantityInStock ?? 0;
+
+    if (availableStock <= 0) {
+        Alert.alert(
+            "Out of Stock",
+            `${selectedProduct.productName} has no stock available to sell.`
+        );
+        return;
+    }
+
+    const existingCartItem = cart.find(
+        (item) =>
+            item.product.productId ===
+            selectedProduct.productId
+    );
+
+    const alreadyInCart =
+        existingCartItem?.quantity ?? 0;
+
+    if (alreadyInCart + quantity > availableStock) {
+        Alert.alert(
+            "Insufficient Stock",
+            `Only ${availableStock} unit(s) of ${selectedProduct.productName} are available.\n\nAlready in cart: ${alreadyInCart}`
+        );
+        return;
+    }
+
+    addToCart(selectedProduct, quantity);
+};
 
     const removeFromCart = (productId: number) => {
         setCart((currentCart) =>
@@ -364,15 +451,32 @@ export default function CashierScreen() {
         );
     };
 
-    const increaseQuantity = (productId: number) => {
-        setCart((currentCart) =>
-            currentCart.map((item) =>
-                item.product.productId === productId
-                    ? { ...item, quantity: item.quantity + 1 }
-                    : item
-            )
-        );
-    };
+   const increaseQuantity = (productId: number) => {
+    setCart((currentCart) =>
+        currentCart.map((item) => {
+            if (item.product.productId !== productId) {
+                return item;
+            }
+
+            const availableStock =
+                item.product.quantityInStock ?? 0;
+
+            if (item.quantity >= availableStock) {
+                Alert.alert(
+                    "Stock Limit Reached",
+                    `Only ${availableStock} unit(s) of ${item.product.productName} are available.`
+                );
+
+                return item;
+            }
+
+            return {
+                ...item,
+                quantity: item.quantity + 1,
+            };
+        })
+    );
+};
 
     const decreaseQuantity = (productId: number) => {
         setCart((currentCart) =>
@@ -595,14 +699,19 @@ const completeSale = async () => {
         return `${API_SERVER}${imageUrl}`;
     };
 
-    const renderProduct = ({ item }: { item: Product }) => {
-        const imageUrl = getImageUrl(item.imageUrl);
+ const renderProduct = ({ item }: { item: Product }) => {
+    const imageUrl = getImageUrl(item.imageUrl);
+    const stock = item.quantityInStock ?? 0;
+    const outOfStock = stock <= 0;
 
-        return (
-            <Pressable
-                style={styles.productCard}
-                onPress={() => openQuantityModal(item)}
-            >
+    return (
+        <Pressable
+            style={[
+                styles.productCard,
+                outOfStock && styles.productCardOutOfStock,
+            ]}
+            onPress={() => openQuantityModal(item)}
+        >
                 {imageUrl ? (
                     <Image
                         source={{ uri: imageUrl }}
@@ -623,6 +732,23 @@ const completeSale = async () => {
                     >
                         {item.productName}
                     </Text>
+                    <View
+    style={[
+        styles.stockBadge,
+        outOfStock && styles.stockBadgeOut,
+    ]}
+>
+    <Text
+        style={[
+            styles.stockBadgeText,
+            outOfStock && styles.stockBadgeTextOut,
+        ]}
+    >
+        {outOfStock
+            ? "OUT OF STOCK"
+            : `STOCK: ${stock}`}
+    </Text>
+</View>
                     <Text
                         style={styles.productCode}
                         numberOfLines={1}
@@ -1817,4 +1943,32 @@ const styles = StyleSheet.create({
         fontWeight: "800",
         color: "#1769E0",
     },
+
+    productCardOutOfStock: {
+    opacity: 0.6,
+},
+
+stockBadge: {
+    alignSelf: "flex-start",
+    marginTop: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    backgroundColor: "#DCFCE7",
+},
+
+stockBadgeOut: {
+    backgroundColor: "#FEE2E2",
+},
+
+stockBadgeText: {
+    fontSize: 10,
+    fontWeight: "900",
+    color: "#166534",
+    letterSpacing: 0.5,
+},
+
+stockBadgeTextOut: {
+    color: "#DC2626",
+},
 });
