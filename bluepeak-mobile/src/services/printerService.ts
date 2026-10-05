@@ -73,7 +73,7 @@ interface BluetoothEscposPrinterNative {
     textPosition: number
   ): Promise<void>;
 
-  cutPaper(): Promise<void>;
+cutOnePoint(): Promise<void>;
 }
 
 /**
@@ -763,7 +763,7 @@ export const printerService = {
       await printer.printerAlign(1);
 
       await printer.printText(
-        "COLDSTONE TRADING\n",
+        "COLDSTONE ",
         {
           widthtimes: 2,
           heigthtimes: 1,
@@ -771,21 +771,11 @@ export const printerService = {
       );
 
       await printer.printText(
-        "(PRIVATE) LIMITED\n",
+        "\n",
         {
           widthtimes: 1,
           heigthtimes: 1,
         }
-      );
-
-      await printer.printText(
-        "2 STIRLING ROAD\n",
-        {}
-      );
-
-      await printer.printText(
-        "HARARE\n",
-        {}
       );
 
       await printer.printText(
@@ -798,6 +788,16 @@ export const printerService = {
       ===================================================== */
 
       await printer.printerAlign(0);
+
+      await printer.printText(
+        "ADDRESS : 2 STIRLING ROAD HARARE\n",
+        {}
+      );
+
+      await printer.printText(
+        "CONTACT : 0242750738\n",
+        {}
+      );
 
       await printer.printText(
         `Invoice: ${receipt.saleId}\n`,
@@ -958,64 +958,20 @@ export const printerService = {
       await printer.printerAlign(1);
 
       await printer.printText(
-        "Thank you for shopping with us pamhata penyu mese\n",
-        {}
-      );
+  "Thank you for shopping with us\n",
+  {}
+);
 
-      await printer.printText(
-        "Please come back soon\n",
-        {}
-      );
+await printer.printText(
+  "Please come back soon\n\n",
+  {
+    cut: true,
+  }
+);
 
-      /* =====================================================
-         EXTRA BLANK SPACE / CUTTER FEED
-      ===================================================== */
-
-      /**
-       * Feed enough paper after the footer so that
-       * the final printed line moves beyond the cutter
-       * position.
-       *
-       * The RK-E260L cutter sits approximately
-       * 10–15mm below the print head.
-       *
-       * 15 line feeds provides a generous safety margin.
-       *
-       * IMPORTANT:
-       * Use plain \n only.
-       * Do not use \n\r with this library.
-       */
-      await printer.printText(
-        "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n",
-        {}
-      );
-
-      /**
-       * Allow physical paper movement to finish
-       * before firing the cutter.
-       */
-      await new Promise((resolve) =>
-        setTimeout(resolve, 2000)
-      );
-
-      /**
-       * Cut paper.
-       *
-       * The native package sends the printer's
-       * ESC/POS cut command (GS V 1).
-       */
-      try {
-        await printer.cutPaper();
-
-        console.log(
-          "✂️ Receipt paper cut successfully."
-        );
-      } catch (error) {
-        console.log(
-          "⚠️ Paper cutter not available:",
-          error
-        );
-      }
+console.log(
+  "✂️ Receipt printed and cutter command sent."
+);
 
       console.log(
         "✅ Coldstone receipt printed successfully."

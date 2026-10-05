@@ -52,7 +52,7 @@ type CartItem = {
     quantity: number;
 };
 
-const API_SERVER = "http://192.168.0.217:5160";
+const API_SERVER = "http://192.168.0.61:5160";
 
 export default function CashierScreen() {
     const router = useRouter();

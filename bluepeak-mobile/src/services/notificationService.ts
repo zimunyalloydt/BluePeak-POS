@@ -7,7 +7,7 @@ import {
 import { getToken } from "../storage/authStorage";
 
 const HUB_URL =
-    "http://192.168.0.217:5160/notificationHub";
+    "http://192.168.0.61:5160/notificationHub";
 
 let connection: HubConnection | null = null;
 
