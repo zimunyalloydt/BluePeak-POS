@@ -37,9 +37,9 @@ export default function AdminDashboard() {
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [pendingRefundCount, setPendingRefundCount] =
-    useState(0);
+        useState(0);
 
-    // --- Sales button tap gate ---
+    // --- Hidden sales button tap gate ---
     const salesTapCount = useRef(0);
     const salesTapTimer = useRef<ReturnType<
         typeof setTimeout
@@ -47,30 +47,21 @@ export default function AdminDashboard() {
 
     const loadDashboard = useCallback(async () => {
         try {
-            const [data, pendingRefunds] =
-    await Promise.all([
-        getAdminDashboard(),
-        getPendingRefunds(),
-    ]);
+            const [data, pendingRefunds] = await Promise.all([
+                getAdminDashboard(),
+                getPendingRefunds(),
+            ]);
 
-setDashboard(data);
-setPendingRefundCount(
-    pendingRefunds.length
-);
+            setDashboard(data);
+            setPendingRefundCount(pendingRefunds.length);
         } catch (error: any) {
-            console.error(
-                "Dashboard error:",
-                error
-            );
+            console.error("Dashboard error:", error);
 
             const message =
                 error?.response?.data?.message ||
                 "Failed to load dashboard.";
 
-            Alert.alert(
-                "Dashboard Error",
-                String(message)
-            );
+            Alert.alert("Dashboard Error", String(message));
         } finally {
             setLoading(false);
             setRefreshing(false);
@@ -106,10 +97,14 @@ setPendingRefundCount(
         router.replace("/");
     };
 
+    /**
+     * Hidden sales entry:
+     * requires 5 quick taps on the brand icon in the header.
+     * Resets if the user pauses for more than 2.5 seconds.
+     */
     const handleSalesPress = () => {
         salesTapCount.current += 1;
 
-        // Reset the counter if the user stops tapping
         if (salesTapTimer.current) {
             clearTimeout(salesTapTimer.current);
         }
@@ -154,9 +149,12 @@ setPendingRefundCount(
 
                 <View style={styles.header}>
                     <View>
-                        <Text style={styles.brand}>
-                            BLUEPEAK
-                        </Text>
+                        {/* Hidden 5-tap sales entry — tap the brand 5× */}
+                        <Pressable onPress={handleSalesPress}>
+                            <Text style={styles.brand}>
+                                BLUEPEAK
+                            </Text>
+                        </Pressable>
 
                         <Text style={styles.title}>
                             Admin Dashboard
@@ -254,50 +252,38 @@ setPendingRefundCount(
 
                     <Pressable
                         style={styles.menuCard}
-                        onPress={handleSalesPress}
+                        onPress={() =>
+                            router.push("/admin/refunds")
+                        }
                     >
                         <View style={styles.menuIcon}>
                             <Text style={styles.menuIconText}>
-                                $
+                                R
                             </Text>
+
+                            {pendingRefundCount > 0 && (
+                                <View
+                                    style={styles.refundBadge}
+                                >
+                                    <Text
+                                        style={
+                                            styles.refundBadgeText
+                                        }
+                                    >
+                                        {pendingRefundCount}
+                                    </Text>
+                                </View>
+                            )}
                         </View>
 
                         <Text style={styles.menuTitle}>
-                            Sales
+                            Refunds
                         </Text>
 
                         <Text style={styles.menuDescription}>
-                            View transactions
+                            Review refund requests
                         </Text>
                     </Pressable>
-                    <Pressable
-    style={styles.menuCard}
-    onPress={() =>
-        router.push("/admin/refunds")
-    }
->
-    <View style={styles.menuIcon}>
-        <Text style={styles.menuIconText}>
-            R
-        </Text>
-
-        {pendingRefundCount > 0 && (
-            <View style={styles.refundBadge}>
-                <Text style={styles.refundBadgeText}>
-                    {pendingRefundCount}
-                </Text>
-            </View>
-        )}
-    </View>
-
-    <Text style={styles.menuTitle}>
-        Refunds
-    </Text>
-
-    <Text style={styles.menuDescription}>
-        Review refund requests
-    </Text>
-</Pressable>
 
                     <Pressable
                         style={styles.menuCard}
@@ -511,24 +497,25 @@ const styles = StyleSheet.create({
         fontWeight: "800",
         fontSize: 13,
     },
-    refundBadge: {
-    position: "absolute",
-    top: -7,
-    right: -7,
-    minWidth: 21,
-    height: 21,
-    paddingHorizontal: 5,
-    borderRadius: 11,
-    backgroundColor: "#DC2626",
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 2,
-    borderColor: "#FFFFFF",
-},
 
-refundBadgeText: {
-    color: "#FFFFFF",
-    fontSize: 10,
-    fontWeight: "900",
-},
+    refundBadge: {
+        position: "absolute",
+        top: -7,
+        right: -7,
+        minWidth: 21,
+        height: 21,
+        paddingHorizontal: 5,
+        borderRadius: 11,
+        backgroundColor: "#DC2626",
+        alignItems: "center",
+        justifyContent: "center",
+        borderWidth: 2,
+        borderColor: "#FFFFFF",
+    },
+
+    refundBadgeText: {
+        color: "#FFFFFF",
+        fontSize: 10,
+        fontWeight: "900",
+    },
 });

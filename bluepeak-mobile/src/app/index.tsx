@@ -49,19 +49,31 @@ export default function LoginScreen() {
             } else {
                 router.replace("/dashboard");
             }
-        } catch (error: any) {
+                } catch (error: any) {
             console.log(
                 "LOGIN ERROR:",
-                error?.response?.data || error?.message
+                error?.response?.data ||
+                    error?.message
             );
 
-            const message =
-                error?.response?.data ||
+            let message =
                 "Unable to connect to BluePeak.";
+
+            if (error?.response?.status === 401) {
+                message =
+                    "Invalid username or password.";
+            } else if (
+                error?.message?.includes(
+                    "No internet connection"
+                )
+            ) {
+                message =
+                    "You are offline and this account has not been successfully logged in on this device before.";
+            }
 
             Alert.alert(
                 "Login failed",
-                String(message)
+                message
             );
         } finally {
             setLoading(false);
