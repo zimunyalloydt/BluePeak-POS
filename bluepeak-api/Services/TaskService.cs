@@ -209,7 +209,7 @@ public class TaskService : ITaskService
                         {
                             Title = "Task Completed",
                             Message = $"Task '{task.Title}' has been completed by all assignees.",
-                            Type = "Task",
+                            Type = "TaskAssigned",
                             TaskId = taskId
                         });
                 }

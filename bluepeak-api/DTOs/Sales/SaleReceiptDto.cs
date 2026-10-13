@@ -17,6 +17,7 @@ public class SaleReceiptDto
     public decimal Total { get; set; }
 
     public decimal AmountPaid { get; set; }
+    public string? CustomerName { get; set; }
 
     public decimal ChangeGiven { get; set; }
 

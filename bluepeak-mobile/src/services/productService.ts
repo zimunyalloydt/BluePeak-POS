@@ -2,6 +2,7 @@ import api from "./api";
 import {
     getLocalProducts,
     saveProductsLocally,
+    syncProductsFromServer,
 } from "./localDatabase";
 
 export interface Product {
@@ -21,29 +22,22 @@ export async function getProducts(): Promise<Product[]> {
     try {
         const response = await api.get<Product[]>("/Product");
 
-        const products = Array.isArray(response.data)
-            ? response.data
-            : [];
-
-               if (products.length > 0) {
-            await saveProductsLocally(products);
+        if (!Array.isArray(response.data)) {
+            throw new Error("Invalid products response from server.");
         }
 
-        /*
-         * Return the locally reconciled products.
-         *
-         * This ensures the cashier sees stock after
-         * accounting for pending/failed offline sales.
-         */
-        const localProducts =
-            await getLocalProducts();
+        // Synchronise SQLite with the main database,
+        // including when the server returns zero products.
+        await syncProductsFromServer(response.data);
 
-        return localProducts;
+        return await getLocalProducts();
     } catch (error) {
         console.warn(
-            "⚠️ Server unavailable. Loading cached products."
+            "⚠️ Could not synchronise products. Using local cache.",
+            error
         );
 
+        // Keep cached products available when offline.
         const localProducts = await getLocalProducts();
 
         if (localProducts.length === 0) {
@@ -51,10 +45,6 @@ export async function getProducts(): Promise<Product[]> {
                 "No internet connection and no products are cached on this device."
             );
         }
-
-        console.log(
-            `📦 Loaded ${localProducts.length} products from local database`
-        );
 
         return localProducts;
     }

@@ -4,17 +4,9 @@ import {
   Platform,
 } from "react-native";
 
-/**
- * Temporary diagnostic:
- * This tells us exactly which Bluetooth native modules
- * are actually registered with React Native at runtime.
- */
-console.log(
-  "🔵 Native Bluetooth modules:",
-  Object.keys(NativeModules).filter((key) =>
-    key.toLowerCase().includes("bluetooth")
-  )
-);
+/* ============================================================
+   TYPES
+============================================================ */
 
 export interface PrinterDevice {
   name: string;
@@ -22,9 +14,36 @@ export interface PrinterDevice {
   connected?: boolean;
 }
 
-interface PrinterResult {
+export interface PrinterResult {
   paired: PrinterDevice[];
   found: PrinterDevice[];
+}
+
+export interface EscPosTextOptions {
+  widthtimes?: number;
+  heigthtimes?: number; // NOTE: native module spelling
+  cut?: boolean;
+}
+
+export interface ReceiptItem {
+  productName: string;
+  quantity: number;
+  unitPrice: number;
+  total: number;
+}
+
+export interface Receipt {
+  saleId: number;
+  saleDate: string;
+  cashier: string;
+  paymentMethod: string;
+  subtotal: number;
+  //vat: number;
+  total: number;
+  amountPaid: number;
+  changeGiven: number;
+  customerName?: string | null;
+  items: ReceiptItem[];
 }
 
 interface BluetoothManagerNative {
@@ -45,24 +64,13 @@ interface BluetoothManagerNative {
 
 interface BluetoothEscposPrinterNative {
   printerInit(): Promise<void>;
-
   printerAlign(align: number): Promise<void>;
 
-  printText(
-    text: string,
-    options?: Record<string, any>
-  ): Promise<void>;
+  printText(text: string, options?: EscPosTextOptions): Promise<void>;
 
-  printPic(
-    base64: string,
-    options?: Record<string, any>
-  ): Promise<void>;
+  printPic(base64: string, options?: Record<string, any>): Promise<void>;
 
-  printQRCode(
-    content: string,
-    size: number,
-    align?: number
-  ): Promise<void>;
+  printQRCode(content: string, size: number, align?: number): Promise<void>;
 
   printBarCode(
     content: string,
@@ -73,52 +81,47 @@ interface BluetoothEscposPrinterNative {
     textPosition: number
   ): Promise<void>;
 
-cutOnePoint(): Promise<void>;
+  cutPaper(): Promise<void>;
+  cutOnePoint(): Promise<void>;
 }
 
-/**
- * Native Bluetooth modules.
- *
- * These are registered from:
- * RNBluetoothEscposPrinterPackage
- */
-const BluetoothManager =
-  NativeModules.BluetoothManager as
-    | BluetoothManagerNative
-    | undefined;
+/* ============================================================
+   CONFIG
+============================================================ */
 
-const BluetoothEscposPrinter =
-  NativeModules.BluetoothEscposPrinter as
-    | BluetoothEscposPrinterNative
-    | undefined;
+export const PRINTER_NAME = "printer001-a3d3";
 
-const PRINTER_NAME = "printer001-a3d3";
+/** 80mm receipt width in normal-font characters. */
+const RECEIPT_WIDTH = 48;
 
-/**
- * Verify that the native modules were successfully
- * registered with React Native.
- */
+const PERMISSION_DENIED_MESSAGE =
+  "Bluetooth permission was denied. " +
+  "Please allow Bluetooth access for BluePeak in Android settings.";
+
+/* ============================================================
+   NATIVE MODULE RESOLUTION
+============================================================ */
+
+const BluetoothManager = NativeModules.BluetoothManager as
+  | BluetoothManagerNative
+  | undefined;
+
+const BluetoothEscposPrinter = NativeModules.BluetoothEscposPrinter as
+  | BluetoothEscposPrinterNative
+  | undefined;
+
+// One-time diagnostic so you can see what's registered.
+console.log(
+  "🔵 Native Bluetooth modules:",
+  Object.keys(NativeModules).filter((key) =>
+    key.toLowerCase().includes("bluetooth")
+  )
+);
+
 function validateNativeModules(): {
   manager: BluetoothManagerNative;
   printer: BluetoothEscposPrinterNative;
 } {
-  console.log(
-    "🔵 Checking BluetoothManager:",
-    !!NativeModules.BluetoothManager
-  );
-
-  console.log(
-    "🔵 Checking BluetoothEscposPrinter:",
-    !!NativeModules.BluetoothEscposPrinter
-  );
-
-  console.log(
-    "🔵 Available Bluetooth modules:",
-    Object.keys(NativeModules).filter((key) =>
-      key.toLowerCase().includes("bluetooth")
-    )
-  );
-
   if (!BluetoothManager) {
     throw new Error(
       "BluetoothManager native module is not available. " +
@@ -139,264 +142,228 @@ function validateNativeModules(): {
   };
 }
 
-/**
- * Request Android Bluetooth permissions.
- */
+/* ============================================================
+   PERMISSIONS
+============================================================ */
+
 async function requestBluetoothPermissions(): Promise<boolean> {
-  if (Platform.OS !== "android") {
-    return true;
-  }
+  if (Platform.OS !== "android") return true;
 
   try {
-    /**
-     * Android 12+
-     */
     if (Platform.Version >= 31) {
-      const result =
-        await PermissionsAndroid.requestMultiple([
-          PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
-          PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
-        ]);
+      const result = await PermissionsAndroid.requestMultiple([
+        PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
+        PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
+      ]);
 
       const scanGranted =
-        result[
-          PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN
-        ] === PermissionsAndroid.RESULTS.GRANTED;
+        result[PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN] ===
+        PermissionsAndroid.RESULTS.GRANTED;
 
       const connectGranted =
-        result[
-          PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT
-        ] === PermissionsAndroid.RESULTS.GRANTED;
+        result[PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT] ===
+        PermissionsAndroid.RESULTS.GRANTED;
 
-      console.log(
-        "🔐 Bluetooth SCAN permission:",
-        scanGranted
-      );
-
-      console.log(
-        "🔐 Bluetooth CONNECT permission:",
-        connectGranted
-      );
+      console.log("🔐 Bluetooth SCAN permission:", scanGranted);
+      console.log("🔐 Bluetooth CONNECT permission:", connectGranted);
 
       return scanGranted && connectGranted;
     }
 
-    /**
-     * Android 11 and below
-     */
     const result = await PermissionsAndroid.request(
       PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION
     );
 
-    const granted =
-      result === PermissionsAndroid.RESULTS.GRANTED;
-
-    console.log(
-      "🔐 Location permission:",
-      granted
-    );
-
+    const granted = result === PermissionsAndroid.RESULTS.GRANTED;
+    console.log("🔐 Location permission:", granted);
     return granted;
   } catch (error) {
-    console.error(
-      "❌ Bluetooth permission request failed:",
-      error
-    );
-
+    console.error("❌ Bluetooth permission request failed:", error);
     return false;
   }
 }
 
 /**
- * The old native package can return scan results
- * either as an object or as a JSON string.
+ * Validate native modules AND ensure permissions are granted.
+ * Every public method funnels through here.
  */
-function parseScanResult(
-  result: PrinterResult | string
-): PrinterResult {
-  if (typeof result === "string") {
-    try {
-      return JSON.parse(result);
-    } catch {
-      return {
-        paired: [],
-        found: [],
-      };
-    }
-  }
+async function ensureReady(): Promise<{
+  manager: BluetoothManagerNative;
+  printer: BluetoothEscposPrinterNative;
+}> {
+  const mods = validateNativeModules();
 
-  return result;
+  const granted = await requestBluetoothPermissions();
+  if (!granted) throw new Error(PERMISSION_DENIED_MESSAGE);
+
+  return mods;
 }
 
-/**
- * Format money for the receipt.
- */
-function formatMoney(value: number): string {
-  const amount = Number(value) || 0;
+/* ============================================================
+   PURE HELPERS
+============================================================ */
 
-  return amount.toFixed(2);
+function parseScanResult(result: PrinterResult | string): PrinterResult {
+  if (typeof result !== "string") return result;
+
+  try {
+    return JSON.parse(result);
+  } catch {
+    return { paired: [], found: [] };
+  }
 }
 
-/**
- * Format quantities without unnecessary decimals.
- */
-function formatNumber(value: number): string {
-  const number = Number(value) || 0;
-
-  if (Number.isInteger(number)) {
-    return String(number);
-  }
-
-  return number.toFixed(2);
+export function formatMoney(value: number): string {
+  return (Number(value) || 0).toFixed(2);
 }
 
-/**
- * Format receipt date.
- */
-function formatDate(value: string): string {
-  if (!value) {
-    return "";
-  }
-
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-
-  return date.toLocaleString();
+export function formatNumber(value: number): string {
+  const n = Number(value) || 0;
+  return Number.isInteger(n) ? String(n) : n.toFixed(2);
 }
 
-/**
- * Keep product names within the width of
- * an 80mm thermal receipt.
- */
-function truncate(
-  value: string,
-  maxLength: number
-): string {
-  if (!value) {
-    return "";
-  }
-
-  if (value.length <= maxLength) {
-    return value;
-  }
-
+export function truncate(value: string, maxLength: number): string {
+  if (!value || value.length <= maxLength) return value ?? "";
   return `${value.substring(0, maxLength - 3)}...`;
 }
 
+/**
+ * Format a receipt date as `M/D/YYYY HH:mm`.
+ *
+ * IMPORTANT: If the backend sends a local-time string like
+ * "2026-04-13 17:51:00" (no timezone), passing it through
+ * `new Date()` will treat it as UTC and shift the hours. We
+ * parse that shape manually so the printed time matches the
+ * store clock exactly.
+ *
+ * For true ISO strings (with `Z` or an offset), we fall back
+ * to `Date` and use local getters.
+ */
+function formatReceiptDate(value: string): string {
+  if (!value) return "";
+
+  const hasTimezone = /[zZ]$|[+-]\d{2}:?\d{2}$/.test(value);
+
+  // Preserve SQL-style timestamps that are already local time.
+  const sqlMatch = value.match(
+    /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})/
+  );
+
+  if (sqlMatch && !hasTimezone) {
+    const [, year, month, day, hours, minutes] = sqlMatch;
+
+    return `${Number(month)}/${Number(day)}/${year} ${hours}:${minutes}`;
+  }
+
+  // The API uses DateTime.UtcNow, but its ISO timestamp may not
+  // include Z. Treat timezone-free ISO timestamps as UTC.
+  const parseValue =
+    !hasTimezone && /^\d{4}-\d{2}-\d{2}T/.test(value)
+      ? `${value}Z`
+      : value;
+
+  const date = new Date(parseValue);
+
+  if (Number.isNaN(date.getTime())) return value;
+
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Africa/Harare",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+
+  const part = (type: string) =>
+    parts.find((item) => item.type === type)?.value ?? "";
+
+  return `${Number(part("month"))}/${Number(part("day"))}/${part("year")} ${part("hour")}:${part("minute")}`;
+}
+/** Right-align an amount against a label, padded to receipt width. */
+function amountLine(label: string, value: number): string {
+  const amount = formatMoney(value);
+  const spaces = RECEIPT_WIDTH - label.length - amount.length;
+  return label + " ".repeat(Math.max(1, spaces)) + amount + "\n";
+}
+
+/** Header row of the item table. */
+function itemHeader(): string {
+  return (
+    "Product".padEnd(27) +
+    "Price".padStart(7) +
+    "Qty".padStart(5) +
+    "Total".padStart(9) +
+    "\n"
+  );
+}
+
+/** One item row of the item table. */
+function itemRow(
+  productName: string,
+  unitPrice: number,
+  quantity: number,
+  total: number
+): string {
+  return (
+    truncate(productName, 27).padEnd(27) +
+    formatMoney(unitPrice).padStart(7) +
+    formatNumber(quantity).padStart(5) +
+    formatMoney(total).padStart(9) +
+    "\n"
+  );
+}
+
+const LINE = "-".repeat(RECEIPT_WIDTH) + "\n";
+
+/* ============================================================
+   PUBLIC SERVICE
+============================================================ */
+
 export const printerService = {
-  /**
-   * Check whether Bluetooth is enabled.
-   */
+  /* ---------- Bluetooth ---------- */
+
   async isBluetoothEnabled(): Promise<boolean> {
-    const { manager } = validateNativeModules();
-
-    const granted =
-      await requestBluetoothPermissions();
-
-    if (!granted) {
-      throw new Error(
-        "Bluetooth permission was denied. " +
-          "Please allow Bluetooth access for BluePeak in Android settings."
-      );
-    }
-
+    const { manager } = await ensureReady();
     return manager.isBluetoothEnabled();
   },
 
-  /**
-   * Scan for Bluetooth printers/devices.
-   */
   async scanDevices(): Promise<PrinterResult> {
-    const { manager } = validateNativeModules();
+    const { manager } = await ensureReady();
 
-    const granted =
-      await requestBluetoothPermissions();
+    console.log("🔍 Scanning Bluetooth devices...");
+    const parsed = parseScanResult(await manager.scanDevices());
 
-    if (!granted) {
-      throw new Error(
-        "Bluetooth permission was denied. " +
-          "Please allow Bluetooth access for BluePeak in Android settings."
-      );
-    }
-
-    console.log(
-      "🔍 Scanning Bluetooth devices..."
-    );
-
-    const result = await manager.scanDevices();
-
-    const parsed = parseScanResult(result);
-
-    console.log(
-      "🔍 Paired Bluetooth devices:",
-      parsed.paired
-    );
-
-    console.log(
-      "🔍 Found Bluetooth devices:",
-      parsed.found
-    );
+    console.log("🔍 Paired Bluetooth devices:", parsed.paired);
+    console.log("🔍 Found Bluetooth devices:", parsed.found);
 
     return parsed;
   },
 
-  /**
-   * Find the configured BluePeak receipt printer.
-   */
   async findPrinter(): Promise<PrinterDevice | null> {
     const result = await this.scanDevices();
+    const devices = [...(result.paired ?? []), ...(result.found ?? [])];
 
-    const devices = [
-      ...(result.paired || []),
-      ...(result.found || []),
-    ];
-
-    console.log(
-      "🖨️ Bluetooth devices:",
-      devices
-    );
+    console.log("🖨️ Bluetooth devices:", devices);
 
     const printer = devices.find(
-      (device) =>
-        device.name?.toLowerCase() ===
-        PRINTER_NAME.toLowerCase()
+      (d) => d.name?.toLowerCase() === PRINTER_NAME.toLowerCase()
     );
 
     if (printer) {
-      console.log(
-        "✅ BluePeak printer found:",
-        printer
-      );
+      console.log("✅ BluePeak printer found:", printer);
     } else {
-      console.log(
-        `❌ Printer "${PRINTER_NAME}" was not found.`
-      );
+      console.log(`❌ Printer "${PRINTER_NAME}" was not found.`);
     }
 
     return printer ?? null;
   },
 
-  /**
-   * Connect to the BluePeak receipt printer.
-   */
   async connect(): Promise<PrinterDevice> {
-    const { manager } = validateNativeModules();
-
-    const granted =
-      await requestBluetoothPermissions();
-
-    if (!granted) {
-      throw new Error(
-        "Bluetooth permission was denied. " +
-          "Please allow Bluetooth access for BluePeak in Android settings."
-      );
-    }
+    const { manager } = await ensureReady();
 
     const printer = await this.findPrinter();
-
     if (!printer) {
       throw new Error(
         `Printer "${PRINTER_NAME}" was not found. ` +
@@ -407,582 +374,236 @@ export const printerService = {
     console.log(
       `🔗 Connecting to ${printer.name} (${printer.address})...`
     );
-
     await manager.connect(printer.address);
-
-    console.log(
-      "✅ Printer connected."
-    );
+    console.log("✅ Printer connected.");
 
     return printer;
   },
 
-  /**
-   * Check whether a printer is currently connected.
-   */
   async isConnected(): Promise<boolean> {
-    const { manager } = validateNativeModules();
-
-    const connected =
-      await manager.isDeviceConnected();
-
-    console.log(
-      "🖨️ Printer connected:",
-      connected
-    );
-
+    const { manager } = await ensureReady();
+    const connected = await manager.isDeviceConnected();
+    console.log("🖨️ Printer connected:", connected);
     return connected;
   },
 
-  /**
-   * Get the currently connected printer.
-   */
   async getConnectedPrinter(): Promise<PrinterDevice | null> {
-    const { manager } = validateNativeModules();
-
+    const { manager } = await ensureReady();
     return manager.getConnectedDevice();
   },
 
-  /**
-   * Disconnect the currently connected printer.
-   */
   async disconnect(): Promise<void> {
-    const { manager } = validateNativeModules();
+    const { manager } = await ensureReady();
+    const address = await manager.getConnectedDeviceAddress();
 
-    const address =
-      await manager.getConnectedDeviceAddress();
+    if (!address) return;
 
-    if (address) {
-      console.log(
-        `🔌 Disconnecting printer ${address}...`
-      );
-
-      await manager.disconnect(address);
-
-      console.log(
-        "✅ Printer disconnected."
-      );
-    }
+    console.log(`🔌 Disconnecting printer ${address}...`);
+    await manager.disconnect(address);
+    console.log("✅ Printer disconnected.");
   },
 
-  /**
-   * Simple printer test.
-   */
-  async testPrint(): Promise<void> {
-    const { printer } = validateNativeModules();
+  /** Connect if not already connected, and return the printer handle. */
+  async ensureConnected(): Promise<{
+    printer: BluetoothEscposPrinterNative;
+    device: PrinterDevice;
+  }> {
+    const { printer } = await ensureReady();
 
-    console.log(
-      "🖨️ Starting printer test..."
-    );
-
-    const connected =
-      await this.isConnected();
-
-    if (!connected) {
+    if (!(await this.isConnected())) {
+      console.log("🔗 Printer is not connected. Connecting...");
       await this.connect();
     }
 
-    /**
-     * Initialize printer before printing.
-     */
+    const device = (await this.getConnectedPrinter()) ?? {
+      name: PRINTER_NAME,
+      address: "",
+      connected: true,
+    };
+
+    return { printer, device };
+  },
+
+  /* ---------- Test print ---------- */
+
+  async testPrint(): Promise<void> {
+    const { printer } = await this.ensureConnected();
+
+    console.log("🖨️ Starting printer test...");
+
     await printer.printerInit();
 
-    /**
-     * Center.
-     */
     await printer.printerAlign(1);
-
-    await printer.printText(
-      "BLUEPEAK POS\n",
-      {
-        widthtimes: 2,
-        heigthtimes: 2,
-      }
-    );
-
-    await printer.printText(
-      "PRINTER TEST\n\n",
-      {}
-    );
+    await printer.printText("BLUEPEAK POS\n", {
+      widthtimes: 2,
+      heigthtimes: 2,
+    });
+    await printer.printText("PRINTER TEST\n\n", {});
 
     await printer.printerAlign(0);
-
-    await printer.printText(
-      "--------------------------------\n",
-      {}
-    );
-
-    await printer.printText(
-      "Printer: RK-E260L\n",
-      {}
-    );
-
-    await printer.printText(
-      "Bluetooth: printer001-a3d3\n",
-      {}
-    );
-
-    await printer.printText(
-      "Status: Connected\n",
-      {}
-    );
-
-    await printer.printText(
-      "--------------------------------\n",
-      {}
-    );
+    await printer.printText(LINE, {});
+    await printer.printText("Printer: RK-E260L\n", {});
+    await printer.printText(`Bluetooth: ${PRINTER_NAME}\n`, {});
+    await printer.printText("Status: Connected\n", {});
+    await printer.printText(LINE, {});
 
     await printer.printerAlign(1);
-
-    await printer.printText(
-      "Bluetooth printing works!\n\n",
-      {}
-    );
+    await printer.printText("Bluetooth printing works!\n\n", {});
 
     /**
-     * Feed the paper sufficiently far beyond
-     * the print head so the cutter can reach
-     * the blank section.
-     *
-     * The RK-E260L cutter is approximately
-     * 10–15mm below the print head.
-     *
-     * Use plain \n. Do not use \n\r.
+     * Feed past the print head so the cutter can reach
+     * the blank section. RK-E260L cutter is ~10–15mm below
+     * the print head. Plain \n, never \n\r.
      */
-    await printer.printText(
-      "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n",
-      {}
-    );
+    await printer.printText("\n".repeat(15), {});
 
-    /**
-     * Allow the paper feed to physically finish
-     * before firing the cutter.
-     */
-    await new Promise((resolve) =>
-      setTimeout(resolve, 2000)
-    );
+    await new Promise((resolve) => setTimeout(resolve, 2000));
 
     try {
       await printer.cutPaper();
-
-      console.log(
-        "✂️ Test paper cut successfully."
-      );
+      console.log("✂️ Test paper cut successfully.");
     } catch (error) {
-      console.log(
-        "⚠️ Paper cutter not available:",
-        error
-      );
+      console.log("⚠️ Paper cutter not available:", error);
     }
 
-    console.log(
-      "✅ Printer test completed."
-    );
+    console.log("✅ Printer test completed.");
   },
 
-  /**
-   * Print a complete Coldstone Trading POS receipt.
-   *
-   * Layout based on the provided 80mm receipt photo.
-   */
-  async printReceipt(receipt: {
-    saleId: number;
-    saleDate: string;
-    cashier: string;
-    paymentMethod: string;
-    subtotal: number;
-    vat: number;
-    total: number;
-    amountPaid: number;
-    changeGiven: number;
-    customerName?: string | null;
+  /* ---------- Receipt ---------- */
 
-    items: {
-      productName: string;
-      quantity: number;
-      unitPrice: number;
-      total: number;
-    }[];
-  }): Promise<void> {
-    const { printer } = validateNativeModules();
-
+  async printReceipt(receipt: Receipt): Promise<void> {
+    console.log("🧾 Printing Coldstone receipt:", receipt.saleId);
     console.log(
-      "🧾 Printing Coldstone receipt:",
-      receipt.saleId
+      "🧾 Receipt payload:",
+      JSON.stringify(
+        {
+          saleId: receipt.saleId,
+          saleDate: receipt.saleDate,
+          customerName: receipt.customerName,
+          cashier: receipt.cashier,
+        },
+        null,
+        2
+      )
     );
 
-    try {
-      /**
-       * Make sure printer is connected.
-       */
-      const connected =
-        await this.isConnected();
+    const { printer } = await this.ensureConnected();
 
-      if (!connected) {
-        console.log(
-          "🔗 Printer is not connected. Connecting..."
-        );
+    await printer.printerInit();
 
-        await this.connect();
-      }
+    /* ----- HEADER ----- */
+    await printer.printerAlign(1);
+    await printer.printText("COLDSTONE ", {
+      widthtimes: 2,
+      heigthtimes: 1,
+    });
+    await printer.printText("\n", { widthtimes: 1, heigthtimes: 1 });
+    await printer.printText("\n", {});
 
-      /**
-       * Initialize printer before printing.
-       */
-      await printer.printerInit();
+    /* ----- STORE / INVOICE ----- */
+    await printer.printerAlign(0);
+    await printer.printText("ADDRESS : 2 STIRLING ROAD HARARE\n", {});
+    await printer.printText("CONTACT : 0242750738\n", {});
+    await printer.printText(`Invoice: ${receipt.saleId}\n`, {});
+    await printer.printText(
+      `${formatReceiptDate(receipt.saleDate)}\n`,
+      {}
+    );
+    await printer.printText(LINE, {});
 
-      /**
-       * RK-E260L / 80mm receipt width.
-       *
-       * 48 characters is a safe normal-font width.
-       */
-      const WIDTH = 48;
+    /* ----- CUSTOMER DETAILS ----- */
+    // Defensive: only accept a real string. If it's an object like
+    // { name: "John" }, unwrap it. Otherwise fall back to walk-in.
+    const rawCustomer: unknown = receipt.customerName;
 
-      const line = "-".repeat(WIDTH);
-
-      /**
-       * Format receipt date:
-       *
-       * 4/13/2026 17:51
-       */
-      const formatReceiptDate = (
-        value: string
-      ): string => {
-        if (!value) {
-          return "";
-        }
-
-        const date = new Date(value);
-
-        if (Number.isNaN(date.getTime())) {
-          return value;
-        }
-
-        const month =
-          date.getMonth() + 1;
-
-        const day =
-          date.getDate();
-
-        const year =
-          date.getFullYear();
-
-        const hours =
-          String(
-            date.getHours()
-          ).padStart(2, "0");
-
-        const minutes =
-          String(
-            date.getMinutes()
-          ).padStart(2, "0");
-
-        return `${month}/${day}/${year} ${hours}:${minutes}`;
-      };
-
-      /**
-       * Right-align an amount against a label.
-       */
-      const amountLine = (
-        label: string,
-        value: number
-      ): string => {
-        const amount =
-          formatMoney(value);
-
-        const spaces =
-          WIDTH -
-          label.length -
-          amount.length;
-
-        return (
-          label +
-          " ".repeat(
-            Math.max(1, spaces)
-          ) +
-          amount +
-          "\n"
-        );
-      };
-
-      /**
-       * Create an item table header.
-       *
-       * Product       Price   Qty       Total
-       */
-      const itemHeader =
-        "Product".padEnd(27) +
-        "Price".padStart(7) +
-        "Qty".padStart(5) +
-        "Total".padStart(9) +
-        "\n";
-
-      /**
-       * Create an item table row.
-       */
-      const itemRow = (
-        productName: string,
-        unitPrice: number,
-        quantity: number,
-        total: number
-      ): string => {
-        const name =
-          truncate(
-            productName,
-            27
-          ).padEnd(27);
-
-        const price =
-          formatMoney(
-            unitPrice
-          ).padStart(7);
-
-        const qty =
-          formatNumber(
-            quantity
-          ).padStart(5);
-
-        const totalAmount =
-          formatMoney(
-            total
-          ).padStart(9);
-
-        return (
-          name +
-          price +
-          qty +
-          totalAmount +
-          "\n"
-        );
-      };
-
-      /* =====================================================
-         HEADER
-      ===================================================== */
-
-      await printer.printerAlign(1);
-
-      await printer.printText(
-        "COLDSTONE ",
-        {
-          widthtimes: 2,
-          heigthtimes: 1,
-        }
-      );
-
-      await printer.printText(
-        "\n",
-        {
-          widthtimes: 1,
-          heigthtimes: 1,
-        }
-      );
-
-      await printer.printText(
-        "\n",
-        {}
-      );
-
-      /* =====================================================
-         INVOICE / DATE
-      ===================================================== */
-
-      await printer.printerAlign(0);
-
-      await printer.printText(
-        "ADDRESS : 2 STIRLING ROAD HARARE\n",
-        {}
-      );
-
-      await printer.printText(
-        "CONTACT : 0242750738\n",
-        {}
-      );
-
-      await printer.printText(
-        `Invoice: ${receipt.saleId}\n`,
-        {}
-      );
-
-      await printer.printText(
-        `${formatReceiptDate(
-          receipt.saleDate
-        )}\n`,
-        {}
-      );
-
-      await printer.printText(
-        line + "\n",
-        {}
-      );
-
-      /* =====================================================
-         ITEMS HEADER
-      ===================================================== */
-
-      await printer.printText(
-        itemHeader,
-        {}
-      );
-
-      await printer.printText(
-        line + "\n",
-        {}
-      );
-
-      /* =====================================================
-         ITEMS
-      ===================================================== */
-
-      for (const item of receipt.items) {
-        await printer.printText(
-          itemRow(
-            item.productName,
-            item.unitPrice,
-            item.quantity,
-            item.total
-          ),
-          {}
-        );
-      }
-
-      /* =====================================================
-         GROSS TOTAL
-      ===================================================== */
-
-      await printer.printText(
-        line + "\n",
-        {}
-      );
-
-      /**
-       * Total quantity.
-       */
-      const totalQuantity =
-        receipt.items.reduce(
-          (sum, item) =>
-            sum +
-            Number(
-              item.quantity || 0
-            ),
-          0
-        );
-
-      await printer.printText(
-        "Gross Total:".padStart(35) +
-          String(
-            totalQuantity
-          ).padStart(5) +
-          " " +
-          formatMoney(
-            receipt.subtotal
-          ).padStart(7) +
-          "\n",
-        {}
-      );
-
-      await printer.printText(
-        line + "\n",
-        {}
-      );
-
-      /* =====================================================
-         TOTALS
-      ===================================================== */
-
-      await printer.printText(
-        amountLine(
-          "Net Total:",
-          receipt.total
-        ),
-        {}
-      );
-
-      await printer.printText(
-        amountLine(
-          "USD paid:",
-          receipt.amountPaid
-        ),
-        {}
-      );
-
-      /**
-       * Positive change = customer paid more.
-       * Negative value = amount still owing.
-       */
-      if (
-        receipt.changeGiven >= 0
-      ) {
-        await printer.printText(
-          amountLine(
-            "Balance:",
-            receipt.changeGiven
-          ),
-          {}
-        );
-      } else {
-        await printer.printText(
-          amountLine(
-            "Balance Due:",
-            Math.abs(
-              receipt.changeGiven
-            )
-          ),
-          {}
-        );
-      }
-
-      /* =====================================================
-         CASHIER
-      ===================================================== */
-
-      await printer.printText(
-        line + "\n",
-        {}
-      );
-
-      await printer.printText(
-        `Sales Person: ${receipt.cashier}\n`,
-        {}
-      );
-
-      /* =====================================================
-         FOOTER
-      ===================================================== */
-
-      await printer.printText(
-        line + "\n",
-        {}
-      );
-
-      await printer.printerAlign(1);
-
-      await printer.printText(
-  "Thank you for shopping with us\n",
-  {}
-);
-
-await printer.printText(
-  "Please come back soon\n\n",
-  {
-    cut: true,
-  }
-);
-
-console.log(
-  "✂️ Receipt printed and cutter command sent."
-);
-
-      console.log(
-        "✅ Coldstone receipt printed successfully."
-      );
-    } catch (error) {
-      console.error(
-        "❌ Receipt printing failed:",
-        error
-      );
-
-      throw error;
+    let customerName = "";
+    if (typeof rawCustomer === "string") {
+      customerName = rawCustomer.trim();
+    } else if (
+      rawCustomer &&
+      typeof rawCustomer === "object" &&
+      "name" in rawCustomer &&
+      typeof (rawCustomer as { name?: unknown }).name === "string"
+    ) {
+      customerName = ((rawCustomer as { name: string }).name ?? "").trim();
     }
+
+    console.log(
+      "🧾 Raw customerName:",
+      JSON.stringify(rawCustomer),
+      "→ resolved:",
+      JSON.stringify(customerName)
+    );
+
+    await printer.printText(
+      `Customer: ${customerName || "Walk-in Customer"}\n`,
+      {}
+    );
+
+    await printer.printText(LINE, {});
+
+    /* ----- ITEMS TABLE ----- */
+    await printer.printText(itemHeader(), {});
+    await printer.printText(LINE, {});
+
+    for (const item of receipt.items) {
+      await printer.printText(
+        itemRow(
+          item.productName,
+          item.unitPrice,
+          item.quantity,
+          item.total
+        ),
+        {}
+      );
+    }
+
+    await printer.printText(LINE, {});
+
+    /* ----- GROSS TOTAL ----- */
+    const totalQuantity = receipt.items.reduce(
+      (sum, item) => sum + Number(item.quantity || 0),
+      0
+    );
+
+    await printer.printText(
+      "Gross Total:".padStart(35) +
+        String(totalQuantity).padStart(5) +
+        " " +
+        formatMoney(receipt.subtotal).padStart(7) +
+        "\n",
+      {}
+    );
+    await printer.printText(LINE, {});
+
+    /* ----- TOTALS ----- */
+    await printer.printText(amountLine("Net Total:", receipt.total), {});
+    await printer.printText(amountLine("USD paid:", receipt.amountPaid), {});
+
+    if (receipt.changeGiven >= 0) {
+      await printer.printText(
+        amountLine("Balance:", receipt.changeGiven),
+        {}
+      );
+    } else {
+      await printer.printText(
+        amountLine("Balance Due:", Math.abs(receipt.changeGiven)),
+        {}
+      );
+    }
+
+    /* ----- CASHIER ----- */
+    await printer.printText(LINE, {});
+    await printer.printText(`Sales Person: ${receipt.cashier}\n`, {});
+
+    /* ----- FOOTER ----- */
+    await printer.printText(LINE, {});
+    await printer.printerAlign(1);
+
+    await printer.printText("Thank you for shopping with us\n", {});
+    await printer.printText("Please come back soon\n\n", { cut: true });
+
+    console.log("✂️ Receipt printed and cutter command sent.");
+    console.log("✅ Coldstone receipt printed successfully.");
   },
 };

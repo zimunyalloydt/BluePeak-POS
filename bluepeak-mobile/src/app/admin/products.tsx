@@ -22,7 +22,7 @@ import {
     Product,
 } from "../../services/productService";
 
-const API_SERVER = "http://192.168.0.61:5160";
+import { API_SERVER } from "../../config/api";
 
 export default function AdminProducts() {
     const router = useRouter();

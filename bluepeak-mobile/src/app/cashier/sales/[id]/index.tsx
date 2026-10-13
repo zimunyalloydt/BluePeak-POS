@@ -539,13 +539,7 @@ export default function CashierSaleDetailsScreen() {
                     <View
                         style={styles.amountRow}
                     >
-                        <Text
-                            style={
-                                styles.amountLabel
-                            }
-                        >
-                            VAT
-                        </Text>
+                       
 
                         <Text
                             style={

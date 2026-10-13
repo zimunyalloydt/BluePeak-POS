@@ -208,26 +208,47 @@ export default function AdminDashboard() {
                 </Text>
 
                 <View style={styles.menuGrid}>
-                    <Pressable
-                        style={styles.menuCard}
-                        onPress={() =>
-                            router.push("/admin/products")
-                        }
-                    >
-                        <View style={styles.menuIcon}>
-                            <Text style={styles.menuIconText}>
-                                P
-                            </Text>
-                        </View>
+             <Pressable
+    style={styles.menuCard}
+    onPress={() =>
+        router.push("/admin/products")
+    }
+>
+    <View style={styles.menuIcon}>
+        <Text style={styles.menuIconText}>
+            P
+        </Text>
+    </View>
 
-                        <Text style={styles.menuTitle}>
-                            Products
-                        </Text>
+    <Text style={styles.menuTitle}>
+        Products
+    </Text>
 
-                        <Text style={styles.menuDescription}>
-                            Manage products
-                        </Text>
-                    </Pressable>
+    <Text style={styles.menuDescription}>
+        Manage products
+    </Text>
+</Pressable>
+
+<Pressable
+    style={styles.menuCard}
+    onPress={() =>
+        router.push("/admin/inventory-prediction")
+    }
+>
+    <View style={styles.menuIcon}>
+        <Text style={styles.menuIconText}>
+            I
+        </Text>
+    </View>
+
+    <Text style={styles.menuTitle}>
+        Smart Inventory
+    </Text>
+
+    <Text style={styles.menuDescription}>
+        AI stock predictions
+    </Text>
+</Pressable>
 
                     <Pressable
                         style={styles.menuCard}

@@ -121,8 +121,8 @@ product.QuantityInStock -= item.Quantity;
         }
 
         sale.Subtotal = subtotal;
-        sale.Vat = subtotal * 0.15m;
-        sale.Total = sale.Subtotal + sale.Vat;
+        sale.Vat = 0m;
+sale.Total = sale.Subtotal;
         sale.ChangeGiven =
             sale.AmountPaid - sale.Total;
 
@@ -166,15 +166,17 @@ product.QuantityInStock -= item.Quantity;
         if (sale == null)
             return null;
 
-        return new SaleReceiptDto
-        {
-            SaleId = sale.SaleId,
-            SaleDate = sale.SaleDate,
-            Cashier =
-                sale.User?.FirstName +
-                " " +
-                sale.User?.LastName,
-            PaymentMethod = sale.PaymentMethod,
+      return new SaleReceiptDto
+{
+    SaleId = sale.SaleId,
+    SaleDate = sale.SaleDate,
+
+    Cashier =
+        sale.User?.FirstName +
+        " " +
+        sale.User?.LastName,
+  CustomerName = sale.CustomerName,
+    PaymentMethod = sale.PaymentMethod,
             Subtotal = sale.Subtotal,
             Vat = sale.Vat,
             Total = sale.Total,

@@ -1,17 +1,21 @@
 using bluepeak_api.DTOs.Products;
 using bluepeak_api.Interfaces;
 using bluepeak_api.Models;
+using bluepeak_api.Data;
+using Microsoft.EntityFrameworkCore;
 using System.IO;
 
 namespace bluepeak_api.Services;
 
 public class ProductService : IProductService
 {
-    private readonly IProductRepository _repository;
+private readonly IProductRepository _repository;
+private readonly AppDbContext _context;
 
-    public ProductService(IProductRepository repository)
+    public ProductService(IProductRepository repository, AppDbContext context)
     {
         _repository = repository;
+        _context = context;
     }
 
     public async Task<IEnumerable<ProductDto>> GetAllAsync()
@@ -251,16 +255,35 @@ public async Task<ProductDto?> RemoveStockAsync(
         ImageUrl = product.ImageUrl
     };
 }
-    public async Task<bool> DeleteAsync(int id)
+public async Task<bool> DeleteAsync(int id)
+{
+    var product = await _repository.GetByProductIdAsync(id);
+
+    if (product == null)
+        return false;
+
+    // Check whether the product has historical sales or refunds.
+    var hasSales = await _context.SaleItems
+        .AnyAsync(s => s.ProductId == id);
+
+    var hasRefunds = await _context.RefundItems
+        .AnyAsync(r => r.ProductId == id);
+
+    if (hasSales || hasRefunds)
     {
-        var product = await _repository.GetByProductIdAsync(id);
+        // Preserve historical records by deactivating the product.
+        product.IsActive = false;
 
-        if (product == null)
-            return false;
-
-        _repository.Delete(product);
+        _repository.Update(product);
         await _repository.SaveChangesAsync();
 
         return true;
     }
+
+    // Products without historical sales or refunds can be deleted.
+    _repository.Delete(product);
+    await _repository.SaveChangesAsync();
+
+    return true;
+}
 }

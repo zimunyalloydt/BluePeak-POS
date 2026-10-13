@@ -11,8 +11,8 @@ using Microsoft.OpenApi.Models;
 using bluepeak_api.Services.Interfaces;
 using bluepeak_api.Hubs;
 using bluepeak_api.Services.Implementations;
-using bluepeak_api.Services.Interfaces;
-using bluepeak_api.Services.Implementations;
+
+
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -43,6 +43,9 @@ builder.Services.AddCors(options =>
 
 builder.Services.AddScoped<ITaskService, TaskService>();
 builder.Services.AddScoped<IUserService, UserService>();
+builder.Services.AddScoped<
+    IInventoryPredictionService,
+    InventoryPredictionService>();
 
 builder.Services.AddScoped<IMessageService, MessageService>();
 

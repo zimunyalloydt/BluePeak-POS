@@ -52,7 +52,7 @@ type CartItem = {
     quantity: number;
 };
 
-const API_SERVER = "http://192.168.0.61:5160";
+import { API_SERVER } from "../../config/api";
 
 export default function CashierScreen() {
     const router = useRouter();
@@ -63,6 +63,7 @@ export default function CashierScreen() {
 
     const scrollViewRef = useRef<ScrollView>(null);
     const checkoutY = useRef(0);
+
     const [printingTest, setPrintingTest] = useState(false);
     const [printerConnected, setPrinterConnected] = useState(false);
 
@@ -85,9 +86,12 @@ export default function CashierScreen() {
     const [customerName, setCustomerName] = useState("");
     const [paymentMethod, setPaymentMethod] = useState("Cash");
 
-    // ---- Products -------------------------------------------------------
+    // ---- Sale success modal state ---------------------------------------
+    const [successModalVisible, setSuccessModalVisible] = useState(false);
+    const [successSaleMessage, setSuccessSaleMessage] = useState("");
+    const [successChange, setSuccessChange] = useState(0);
 
-
+    // ---- Printer --------------------------------------------------------
 
     const handleTestPrinter = async () => {
         try {
@@ -127,35 +131,29 @@ export default function CashierScreen() {
         }
     };
 
+    // ---- Products -------------------------------------------------------
 
     const loadProducts = useCallback(async () => {
-    try {
-        setLoading(true);
+        try {
+            setLoading(true);
 
-        await initializeLocalDatabase();
+            await initializeLocalDatabase();
 
-        const data = await getProducts();
+            const data = await getProducts();
 
-        setProducts(
-            Array.isArray(data)
-                ? data
-                : []
-        );
-    } catch (error: any) {
-        console.error(
-            "Failed to load products:",
-            error
-        );
+            setProducts(Array.isArray(data) ? data : []);
+        } catch (error: any) {
+            console.error("Failed to load products:", error);
 
-        Alert.alert(
-            "Products Unavailable",
-            error?.message ||
-                "Unable to load products."
-        );
-    } finally {
-        setLoading(false);
-    }
-}, []);
+            Alert.alert(
+                "Products Unavailable",
+                error?.message || "Unable to load products."
+            );
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
     // ---- Tasks ----------------------------------------------------------
 
     const loadTasks = useCallback(async () => {
@@ -227,9 +225,9 @@ export default function CashierScreen() {
     // ---- Initial load ---------------------------------------------------
 
     useEffect(() => {
-    loadProducts();
-    loadTasks();
-}, [loadProducts, loadTasks]);
+        loadProducts();
+        loadTasks();
+    }, [loadProducts, loadTasks]);
 
     const activeTask = useMemo(
         () =>
@@ -294,103 +292,103 @@ export default function CashierScreen() {
 
     // ---- Cart -----------------------------------------------------------
 
-  const addToCart = (product: Product, quantity: number) => {
-    if (quantity <= 0) return;
+    const addToCart = (product: Product, quantity: number) => {
+        if (quantity <= 0) return;
 
-    const availableStock = product.quantityInStock ?? 0;
+        const availableStock = product.quantityInStock ?? 0;
 
-    if (availableStock <= 0) {
-        Alert.alert(
-            "Out of Stock",
-            `${product.productName} has no stock available to sell.`
-        );
-        return;
-    }
-
-    setCart((currentCart) => {
-        const existing = currentCart.find(
-            (item) =>
-                item.product.productId === product.productId
-        );
-
-        const currentQuantity = existing?.quantity ?? 0;
-        const requestedTotal = currentQuantity + quantity;
-
-        if (requestedTotal > availableStock) {
+        if (availableStock <= 0) {
             Alert.alert(
-                "Insufficient Stock",
-                `${product.productName} has only ${availableStock} unit(s) available.\n\nAlready in cart: ${currentQuantity}\nRequested: ${quantity}`
+                "Out of Stock",
+                `${product.productName} has no stock available to sell.`
             );
-
-            return currentCart;
+            return;
         }
 
-        if (existing) {
-            return currentCart.map((item) =>
-                item.product.productId === product.productId
-                    ? {
-                          ...item,
-                          quantity: requestedTotal,
-                      }
-                    : item
+        setCart((currentCart) => {
+            const existing = currentCart.find(
+                (item) =>
+                    item.product.productId === product.productId
             );
+
+            const currentQuantity = existing?.quantity ?? 0;
+            const requestedTotal = currentQuantity + quantity;
+
+            if (requestedTotal > availableStock) {
+                Alert.alert(
+                    "Insufficient Stock",
+                    `${product.productName} has only ${availableStock} unit(s) available.\n\nAlready in cart: ${currentQuantity}\nRequested: ${quantity}`
+                );
+
+                return currentCart;
+            }
+
+            if (existing) {
+                return currentCart.map((item) =>
+                    item.product.productId === product.productId
+                        ? {
+                              ...item,
+                              quantity: requestedTotal,
+                          }
+                        : item
+                );
+            }
+
+            return [
+                ...currentCart,
+                {
+                    product,
+                    quantity,
+                },
+            ];
+        });
+
+        setQuantityModalVisible(false);
+        setSelectedProduct(null);
+    };
+
+    const openQuantityModal = (product: Product) => {
+        const stock = product.quantityInStock ?? 0;
+
+        if (stock <= 0) {
+            Alert.alert(
+                "Out of Stock",
+                `${product.productName} has no stock available to sell.`
+            );
+            return;
         }
 
-        return [
-            ...currentCart,
-            {
-                product,
-                quantity,
-            },
-        ];
-    });
+        setSelectedProduct(product);
+        setQuantityInput("1");
+        setQuantityModalVisible(true);
+    };
 
-    setQuantityModalVisible(false);
-    setSelectedProduct(null);
-};
+    const increaseModalQuantity = () => {
+        if (!selectedProduct) return;
 
-   const openQuantityModal = (product: Product) => {
-    const stock = product.quantityInStock ?? 0;
+        const current = Number(quantityInput) || 0;
+        const availableStock =
+            selectedProduct.quantityInStock ?? 0;
 
-    if (stock <= 0) {
-        Alert.alert(
-            "Out of Stock",
-            `${product.productName} has no stock available to sell.`
+        const existingCartItem = cart.find(
+            (item) =>
+                item.product.productId ===
+                selectedProduct.productId
         );
-        return;
-    }
 
-    setSelectedProduct(product);
-    setQuantityInput("1");
-    setQuantityModalVisible(true);
-};
+        const alreadyInCart =
+            existingCartItem?.quantity ?? 0;
 
-   const increaseModalQuantity = () => {
-    if (!selectedProduct) return;
+        if (alreadyInCart + current >= availableStock) {
+            Alert.alert(
+                "Stock Limit Reached",
+                `Only ${availableStock} unit(s) of ${selectedProduct.productName} are available.`
+            );
+            return;
+        }
 
-    const current = Number(quantityInput) || 0;
-    const availableStock =
-        selectedProduct.quantityInStock ?? 0;
-
-    const existingCartItem = cart.find(
-        (item) =>
-            item.product.productId ===
-            selectedProduct.productId
-    );
-
-    const alreadyInCart =
-        existingCartItem?.quantity ?? 0;
-
-    if (alreadyInCart + current >= availableStock) {
-        Alert.alert(
-            "Stock Limit Reached",
-            `Only ${availableStock} unit(s) of ${selectedProduct.productName} are available.`
-        );
-        return;
-    }
-
-    setQuantityInput(String(current + 1));
-};
+        setQuantityInput(String(current + 1));
+    };
 
     const decreaseModalQuantity = () => {
         const current = Number(quantityInput) || 1;
@@ -399,49 +397,49 @@ export default function CashierScreen() {
         }
     };
 
- const confirmQuantity = () => {
-    if (!selectedProduct) return;
+    const confirmQuantity = () => {
+        if (!selectedProduct) return;
 
-    const quantity = Number(quantityInput);
+        const quantity = Number(quantityInput);
 
-    if (!Number.isInteger(quantity) || quantity <= 0) {
-        Alert.alert(
-            "Invalid Quantity",
-            "Please enter a valid quantity."
+        if (!Number.isInteger(quantity) || quantity <= 0) {
+            Alert.alert(
+                "Invalid Quantity",
+                "Please enter a valid quantity."
+            );
+            return;
+        }
+
+        const availableStock =
+            selectedProduct.quantityInStock ?? 0;
+
+        if (availableStock <= 0) {
+            Alert.alert(
+                "Out of Stock",
+                `${selectedProduct.productName} has no stock available to sell.`
+            );
+            return;
+        }
+
+        const existingCartItem = cart.find(
+            (item) =>
+                item.product.productId ===
+                selectedProduct.productId
         );
-        return;
-    }
 
-    const availableStock =
-        selectedProduct.quantityInStock ?? 0;
+        const alreadyInCart =
+            existingCartItem?.quantity ?? 0;
 
-    if (availableStock <= 0) {
-        Alert.alert(
-            "Out of Stock",
-            `${selectedProduct.productName} has no stock available to sell.`
-        );
-        return;
-    }
+        if (alreadyInCart + quantity > availableStock) {
+            Alert.alert(
+                "Insufficient Stock",
+                `Only ${availableStock} unit(s) of ${selectedProduct.productName} are available.\n\nAlready in cart: ${alreadyInCart}`
+            );
+            return;
+        }
 
-    const existingCartItem = cart.find(
-        (item) =>
-            item.product.productId ===
-            selectedProduct.productId
-    );
-
-    const alreadyInCart =
-        existingCartItem?.quantity ?? 0;
-
-    if (alreadyInCart + quantity > availableStock) {
-        Alert.alert(
-            "Insufficient Stock",
-            `Only ${availableStock} unit(s) of ${selectedProduct.productName} are available.\n\nAlready in cart: ${alreadyInCart}`
-        );
-        return;
-    }
-
-    addToCart(selectedProduct, quantity);
-};
+        addToCart(selectedProduct, quantity);
+    };
 
     const removeFromCart = (productId: number) => {
         setCart((currentCart) =>
@@ -451,32 +449,32 @@ export default function CashierScreen() {
         );
     };
 
-   const increaseQuantity = (productId: number) => {
-    setCart((currentCart) =>
-        currentCart.map((item) => {
-            if (item.product.productId !== productId) {
-                return item;
-            }
+    const increaseQuantity = (productId: number) => {
+        setCart((currentCart) =>
+            currentCart.map((item) => {
+                if (item.product.productId !== productId) {
+                    return item;
+                }
 
-            const availableStock =
-                item.product.quantityInStock ?? 0;
+                const availableStock =
+                    item.product.quantityInStock ?? 0;
 
-            if (item.quantity >= availableStock) {
-                Alert.alert(
-                    "Stock Limit Reached",
-                    `Only ${availableStock} unit(s) of ${item.product.productName} are available.`
-                );
+                if (item.quantity >= availableStock) {
+                    Alert.alert(
+                        "Stock Limit Reached",
+                        `Only ${availableStock} unit(s) of ${item.product.productName} are available.`
+                    );
 
-                return item;
-            }
+                    return item;
+                }
 
-            return {
-                ...item,
-                quantity: item.quantity + 1,
-            };
-        })
-    );
-};
+                return {
+                    ...item,
+                    quantity: item.quantity + 1,
+                };
+            })
+        );
+    };
 
     const decreaseQuantity = (productId: number) => {
         setCart((currentCart) =>
@@ -490,28 +488,22 @@ export default function CashierScreen() {
         );
     };
 
-  const cartSubtotal = useMemo(
-    () =>
-        cart.reduce(
-            (total, item) =>
-                total +
-                item.product.sellingPrice *
-                    item.quantity,
-            0
-        ),
-    [cart]
-);
+    const cartSubtotal = useMemo(
+        () =>
+            cart.reduce(
+                (total, item) =>
+                    total +
+                    item.product.sellingPrice * item.quantity,
+                0
+            ),
+        [cart]
+    );
 
-const cartVat = cartSubtotal * 0.15;
+    const cartVat = cartSubtotal * 0;
+    const cartTotal = cartSubtotal ;
 
-const cartTotal =
-    cartSubtotal + cartVat;
-
-const parsedAmountPaid =
-    parseFloat(amountPaid) || 0;
-
-const change =
-    parsedAmountPaid - cartTotal;
+    const parsedAmountPaid = parseFloat(amountPaid) || 0;
+    const change = parsedAmountPaid - cartTotal;
 
     // ---- Checkout -------------------------------------------------------
 
@@ -522,169 +514,104 @@ const change =
         setPaymentMethod("Cash");
     };
 
-const completeSale = async () => {
-    if (!user) {
-        Alert.alert(
-            "Session Error",
-            "Please log in again."
-        );
-        return;
-    }
+    const completeSale = async () => {
+        if (!user) {
+            Alert.alert("Session Error", "Please log in again.");
+            return;
+        }
 
-    if (cart.length === 0) {
-        Alert.alert(
-            "Empty Cart",
-            "Add at least one product."
-        );
-        return;
-    }
+        if (cart.length === 0) {
+            Alert.alert("Empty Cart", "Add at least one product.");
+            return;
+        }
 
-    if (parsedAmountPaid < cartTotal) {
-        Alert.alert(
-            "Insufficient Payment",
-            `Amount paid must be at least $${cartTotal.toFixed(2)}.`
-        );
-        return;
-    }
+        if (parsedAmountPaid < cartTotal) {
+            Alert.alert(
+                "Insufficient Payment",
+                `Amount paid must be at least $${cartTotal.toFixed(2)}.`
+            );
+            return;
+        }
 
-    try {
-        setProcessingSale(true);
-
-        /*
-         * createSale() is now LOCAL-FIRST.
-         *
-         * The sale is saved to SQLite before the
-         * application attempts to contact the server.
-         */
-        const result = await createSale({
-            userId: user.userId,
-            paymentMethod,
-            amountPaid: parsedAmountPaid,
-            customerName:
-                customerName.trim() || undefined,
-            items: cart.map((item) => ({
-                productId:
-                    item.product.productId,
-                quantity: item.quantity,
-                productName:
-                    item.product.productName,
-                unitPrice:
-                    item.product.sellingPrice,
-                costPrice:
-                    item.product.costPrice,
-            })),
-        });
-
-        console.log(
-            "✅ SALE CREATED:",
-            result
-        );
-
-        /*
-         * For an offline sale, getReceipt()
-         * reads the receipt from SQLite.
-         *
-         * For an online sale, it reads the
-         * official server receipt.
-         */
-        const receipt =
-            await getReceipt(result.saleId);
-
-        console.log(
-            "🧾 RECEIPT DATA:",
-            JSON.stringify(
-                receipt,
-                null,
-                2
-            )
-        );
-
-        /*
-         * Print the receipt.
-         *
-         * This must work whether the server
-         * was available or not.
-         */
         try {
+            setProcessingSale(true);
+
+            const result = await createSale({
+                userId: user.userId,
+                paymentMethod,
+                amountPaid: parsedAmountPaid,
+                customerName:
+                    customerName.trim() || undefined,
+                items: cart.map((item) => ({
+                    productId: item.product.productId,
+                    quantity: item.quantity,
+                    productName: item.product.productName,
+                    unitPrice: item.product.sellingPrice,
+                    costPrice: item.product.costPrice,
+                })),
+            });
+
+            console.log("✅ SALE CREATED:", result);
+
+            const receipt = await getReceipt(result.saleId);
+
             console.log(
-                "🖨️ Printing receipt..."
+                "🧾 RECEIPT DATA:",
+                JSON.stringify(receipt, null, 2)
             );
 
-            await printerService.printReceipt(
-                receipt
-            );
+            try {
+                console.log("🖨️ Printing receipt...");
 
-            console.log(
-                "✅ Receipt printed successfully."
-            );
+                await printerService.printReceipt(receipt);
 
-            const saleMessage =
-                result.offline
+                console.log(
+                    "✅ Receipt printed successfully."
+                );
+
+                const saleMessage = result.offline
                     ? "Sale saved on this device.\nIt will automatically sync when the server is available."
                     : `Sale #${result.saleId} completed successfully.`;
 
-            Alert.alert(
-                result.offline
-                    ? "Sale Saved Offline"
-                    : "Sale Complete",
-                saleMessage +
-                    "\n\nReceipt printed." +
-                    `\n\nChange: $${change.toFixed(2)}`,
-                [
-                    {
-                        text: "New Sale",
-                        onPress:
-                            resetSaleForm,
-                    },
-                ]
-            );
-        } catch (printError: any) {
-            /*
-             * The sale is already saved.
-             * A printer failure must not cancel it.
-             */
-            console.error(
-                "❌ Receipt printing failed:",
-                printError
-            );
+                setSuccessSaleMessage(saleMessage);
+                setSuccessChange(change);
+                setSuccessModalVisible(true);
+            } catch (printError: any) {
+                console.error(
+                    "❌ Receipt printing failed:",
+                    printError
+                );
 
-            Alert.alert(
-                "Sale Complete — Printing Failed",
-                `Sale #${result.saleId} was saved successfully, but the receipt could not be printed.` +
-                    "\n\nYou can print the receipt again from My Sales." +
-                    `\n\nReason: ${
-                        printError?.message ||
-                        "Unable to connect to the printer."
-                    }`,
-                [
-                    {
-                        text: "New Sale",
-                        onPress:
-                            resetSaleForm,
-                    },
-                ]
-            );
+                Alert.alert(
+                    "Sale Complete — Printing Failed",
+                    `Sale #${result.saleId} was saved successfully, but the receipt could not be printed.` +
+                        "\n\nYou can print the receipt again from My Sales." +
+                        `\n\nReason: ${
+                            printError?.message ||
+                            "Unable to connect to the printer."
+                        }`,
+                    [
+                        {
+                            text: "New Sale",
+                            onPress: resetSaleForm,
+                        },
+                    ]
+                );
+            }
+        } catch (error: any) {
+            console.error("❌ Sale failed:", error);
+
+            const message =
+                error?.response?.data?.message ||
+                error?.response?.data ||
+                error?.message ||
+                "Failed to complete sale.";
+
+            Alert.alert("Sale Failed", String(message));
+        } finally {
+            setProcessingSale(false);
         }
-    } catch (error: any) {
-        console.error(
-            "❌ Sale failed:",
-            error
-        );
-
-        const message =
-            error?.response?.data?.message ||
-            error?.response?.data ||
-            error?.message ||
-            "Failed to complete sale.";
-
-        Alert.alert(
-            "Sale Failed",
-            String(message)
-        );
-    } finally {
-        setProcessingSale(false);
-    }
-};
+    };
 
     const handleLogout = async () => {
         await logout();
@@ -699,19 +626,19 @@ const completeSale = async () => {
         return `${API_SERVER}${imageUrl}`;
     };
 
- const renderProduct = ({ item }: { item: Product }) => {
-    const imageUrl = getImageUrl(item.imageUrl);
-    const stock = item.quantityInStock ?? 0;
-    const outOfStock = stock <= 0;
+    const renderProduct = ({ item }: { item: Product }) => {
+        const imageUrl = getImageUrl(item.imageUrl);
+        const stock = item.quantityInStock ?? 0;
+        const outOfStock = stock <= 0;
 
-    return (
-        <Pressable
-            style={[
-                styles.productCard,
-                outOfStock && styles.productCardOutOfStock,
-            ]}
-            onPress={() => openQuantityModal(item)}
-        >
+        return (
+            <Pressable
+                style={[
+                    styles.productCard,
+                    outOfStock && styles.productCardOutOfStock,
+                ]}
+                onPress={() => openQuantityModal(item)}
+            >
                 {imageUrl ? (
                     <Image
                         source={{ uri: imageUrl }}
@@ -732,29 +659,33 @@ const completeSale = async () => {
                     >
                         {item.productName}
                     </Text>
+
                     <View
-    style={[
-        styles.stockBadge,
-        outOfStock && styles.stockBadgeOut,
-    ]}
->
-    <Text
-        style={[
-            styles.stockBadgeText,
-            outOfStock && styles.stockBadgeTextOut,
-        ]}
-    >
-        {outOfStock
-            ? "OUT OF STOCK"
-            : `STOCK: ${stock}`}
-    </Text>
-</View>
+                        style={[
+                            styles.stockBadge,
+                            outOfStock && styles.stockBadgeOut,
+                        ]}
+                    >
+                        <Text
+                            style={[
+                                styles.stockBadgeText,
+                                outOfStock &&
+                                    styles.stockBadgeTextOut,
+                            ]}
+                        >
+                            {outOfStock
+                                ? "OUT OF STOCK"
+                                : `STOCK: ${stock}`}
+                        </Text>
+                    </View>
+
                     <Text
                         style={styles.productCode}
                         numberOfLines={1}
                     >
                         {item.productCode}
                     </Text>
+
                     <Text style={styles.productPrice}>
                         ${Number(item.sellingPrice).toFixed(2)}
                     </Text>
@@ -810,7 +741,8 @@ const completeSale = async () => {
                     contentContainerStyle={styles.scrollContent}
                     keyboardShouldPersistTaps="handled"
                     automaticallyAdjustKeyboardInsets
-                    keyboardDismissMode="interactive"
+                    keyboardDismissMode="on-drag"
+                    showsVerticalScrollIndicator={false}
                 >
                     <TextInput
                         value={search}
@@ -1029,36 +961,45 @@ const completeSale = async () => {
                                 }}
                             >
                                 <View style={styles.totalRow}>
-                                   
-                                   <View style={styles.totalRow}>
-    <Text style={styles.totalLabel}>
-        SUBTOTAL
-    </Text>
+                                    <Text
+                                        style={styles.totalLabel}
+                                    >
+                                        SUBTOTAL
+                                    </Text>
 
-    <Text style={styles.totalValue}>
-        ${cartSubtotal.toFixed(2)}
-    </Text>
-</View>
+                                    <Text
+                                        style={styles.totalValue}
+                                    >
+                                        ${cartSubtotal.toFixed(2)}
+                                    </Text>
+                                </View>
 
-<View style={styles.totalRow}>
-    <Text style={styles.totalLabel}>
-        VAT (15%)
-    </Text>
+                                <View style={styles.totalRow}>
+                                    <Text
+                                        style={styles.totalLabel}
+                                    >
+                                       
+                                    </Text>
 
-    <Text style={styles.totalValue}>
-        ${cartVat.toFixed(2)}
-    </Text>
-</View>
+                                    <Text
+                                        style={styles.totalValue}
+                                    >
+                                       
+                                    </Text>
+                                </View>
 
-<View style={styles.totalRow}>
-    <Text style={styles.totalLabel}>
-        TOTAL
-    </Text>
+                                <View style={styles.totalRow}>
+                                    <Text
+                                        style={styles.totalLabel}
+                                    >
+                                        TOTAL
+                                    </Text>
 
-    <Text style={styles.totalValue}>
-        ${cartTotal.toFixed(2)}
-    </Text>
-</View>
+                                    <Text
+                                        style={styles.totalValue}
+                                    >
+                                        ${cartTotal.toFixed(2)}
+                                    </Text>
                                 </View>
 
                                 <TextInput
@@ -1116,19 +1057,10 @@ const completeSale = async () => {
                                 <TextInput
                                     value={amountPaid}
                                     onChangeText={setAmountPaid}
-                                    onFocus={() => {
-                                        setTimeout(() => {
-                                            scrollViewRef.current?.scrollTo(
-                                                {
-                                                    y: checkoutY.current,
-                                                    animated: true,
-                                                }
-                                            );
-                                        }, 150);
-                                    }}
                                     placeholder="0.00"
                                     placeholderTextColor="#8A8F98"
                                     keyboardType="decimal-pad"
+                                    inputMode="decimal"
                                     style={styles.amountInput}
                                 />
 
@@ -1421,6 +1353,54 @@ const completeSale = async () => {
                 </KeyboardAvoidingView>
             </Modal>
 
+            {/* Sale success modal */}
+            <Modal
+                visible={successModalVisible}
+                transparent
+                animationType="fade"
+                onRequestClose={() => {
+                    setSuccessModalVisible(false);
+                    resetSaleForm();
+                }}
+            >
+                <View style={styles.successModalOverlay}>
+                    <View style={styles.successModal}>
+                        <View style={styles.successIconContainer}>
+                            <Text style={styles.successIcon}>✓</Text>
+                        </View>
+
+                        <Text style={styles.successTitle}>
+                            Sale Complete
+                        </Text>
+
+                        <Text style={styles.successMessage}>
+                            {successSaleMessage}
+                        </Text>
+
+                        <View style={styles.successChangeContainer}>
+                            <Text style={styles.successChangeLabel}>
+                                CHANGE
+                            </Text>
+                            <Text style={styles.successChangeValue}>
+                                ${successChange.toFixed(2)}
+                            </Text>
+                        </View>
+
+                        <Pressable
+                            onPress={() => {
+                                setSuccessModalVisible(false);
+                                resetSaleForm();
+                            }}
+                            style={styles.successButton}
+                        >
+                            <Text style={styles.successButtonText}>
+                                New Sale
+                            </Text>
+                        </Pressable>
+                    </View>
+                </View>
+            </Modal>
+
             {/* Task alert modal */}
             <TaskAlertModal
                 task={activeTask}
@@ -1433,8 +1413,12 @@ const completeSale = async () => {
 }
 
 const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: "#F5F7FA" },
+    container: {
+        flex: 1,
+        backgroundColor: "#F4F6F8",
+    },
 
+    // ---- Header ---------------------------------------------------------
     header: {
         backgroundColor: "#0B1F3A",
         paddingHorizontal: 20,
@@ -1450,7 +1434,11 @@ const styles = StyleSheet.create({
         fontWeight: "900",
         letterSpacing: 2,
     },
-    headerTitle: { color: "#B9C7D9", fontSize: 13, marginTop: 3 },
+    headerTitle: {
+        color: "#B9C7D9",
+        fontSize: 13,
+        marginTop: 3,
+    },
     headerRight: {
         flexDirection: "row",
         alignItems: "center",
@@ -1475,10 +1463,18 @@ const styles = StyleSheet.create({
         paddingVertical: 7,
         borderRadius: 7,
     },
-    logoutText: { color: "#FFFFFF", fontSize: 11, fontWeight: "700" },
+    logoutText: {
+        color: "#FFFFFF",
+        fontSize: 11,
+        fontWeight: "700",
+    },
 
-    scrollContent: { padding: 12, paddingBottom: 40 },
+    scrollContent: {
+        padding: 12,
+        paddingBottom: 40,
+    },
 
+    // ---- Search ---------------------------------------------------------
     searchInput: {
         backgroundColor: "#FFFFFF",
         borderRadius: 12,
@@ -1491,6 +1487,7 @@ const styles = StyleSheet.create({
         marginBottom: 14,
     },
 
+    // ---- Section headers ------------------------------------------------
     sectionHeader: {
         flexDirection: "row",
         justifyContent: "space-between",
@@ -1502,9 +1499,18 @@ const styles = StyleSheet.create({
         fontWeight: "800",
         color: "#172033",
     },
-    sectionSubtitle: { color: "#7B8492", fontSize: 11, marginTop: 2 },
-    refreshText: { color: "#1769E0", fontWeight: "700", fontSize: 12 },
+    sectionSubtitle: {
+        color: "#7B8492",
+        fontSize: 11,
+        marginTop: 2,
+    },
+    refreshText: {
+        color: "#1769E0",
+        fontWeight: "700",
+        fontSize: 12,
+    },
 
+    // ---- Products -------------------------------------------------------
     productRow: {
         justifyContent: "flex-start",
         gap: 8,
@@ -1517,6 +1523,9 @@ const styles = StyleSheet.create({
         overflow: "hidden",
         borderWidth: 1,
         borderColor: "#E3E7EC",
+    },
+    productCardOutOfStock: {
+        opacity: 0.6,
     },
     productImage: {
         width: "100%",
@@ -1534,23 +1543,55 @@ const styles = StyleSheet.create({
         fontWeight: "900",
         color: "#8190A5",
     },
-    productCardContent: { padding: 7 },
+    productCardContent: {
+        padding: 7,
+    },
     productName: {
         fontSize: 12,
         fontWeight: "700",
         color: "#172033",
     },
-    productCode: { color: "#8A93A0", fontSize: 9, marginTop: 2 },
+    productCode: {
+        color: "#8A93A0",
+        fontSize: 9,
+        marginTop: 2,
+    },
     productPrice: {
         color: "#1769E0",
         fontSize: 13,
         fontWeight: "900",
         marginTop: 4,
     },
+    stockBadge: {
+        alignSelf: "flex-start",
+        marginTop: 6,
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        borderRadius: 6,
+        backgroundColor: "#DCFCE7",
+    },
+    stockBadgeOut: {
+        backgroundColor: "#FEE2E2",
+    },
+    stockBadgeText: {
+        fontSize: 10,
+        fontWeight: "900",
+        color: "#166534",
+        letterSpacing: 0.5,
+    },
+    stockBadgeTextOut: {
+        color: "#DC2626",
+    },
 
-    loadingContainer: { paddingVertical: 40, alignItems: "center" },
-    loadingText: { marginTop: 10, color: "#7B8492" },
-
+    // ---- Loading / empty ------------------------------------------------
+    loadingContainer: {
+        paddingVertical: 40,
+        alignItems: "center",
+    },
+    loadingText: {
+        marginTop: 10,
+        color: "#7B8492",
+    },
     emptyProducts: {
         backgroundColor: "#FFFFFF",
         borderRadius: 14,
@@ -1562,17 +1603,25 @@ const styles = StyleSheet.create({
         color: "#172033",
         fontSize: 16,
     },
-    emptySubtitle: { color: "#7B8492", marginTop: 5 },
+    emptySubtitle: {
+        color: "#7B8492",
+        marginTop: 5,
+    },
 
-    cartSection: { marginTop: 20 },
+    // ---- Cart -----------------------------------------------------------
+    cartSection: {
+        marginTop: 20,
+    },
     cartHeader: {
         flexDirection: "row",
         justifyContent: "space-between",
         alignItems: "center",
         marginBottom: 10,
     },
-    clearText: { color: "#D64545", fontWeight: "700" },
-
+    clearText: {
+        color: "#D64545",
+        fontWeight: "700",
+    },
     emptyCart: {
         backgroundColor: "#FFFFFF",
         borderRadius: 14,
@@ -1586,8 +1635,11 @@ const styles = StyleSheet.create({
         fontWeight: "800",
         color: "#172033",
     },
-    emptyCartText: { color: "#7B8492", marginTop: 4, fontSize: 12 },
-
+    emptyCartText: {
+        color: "#7B8492",
+        marginTop: 4,
+        fontSize: 12,
+    },
     cartItem: {
         backgroundColor: "#FFFFFF",
         borderRadius: 12,
@@ -1599,14 +1651,19 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderColor: "#E3E7EC",
     },
-    cartItemInfo: { flex: 1 },
+    cartItemInfo: {
+        flex: 1,
+    },
     cartItemName: {
         color: "#172033",
         fontWeight: "700",
         fontSize: 13,
     },
-    cartItemPrice: { color: "#8A93A0", fontSize: 10, marginTop: 3 },
-
+    cartItemPrice: {
+        color: "#8A93A0",
+        fontSize: 10,
+        marginTop: 3,
+    },
     quantityControls: {
         flexDirection: "row",
         alignItems: "center",
@@ -1644,6 +1701,7 @@ const styles = StyleSheet.create({
         fontWeight: "700",
     },
 
+    // ---- Checkout -------------------------------------------------------
     checkout: {
         backgroundColor: "#FFFFFF",
         borderRadius: 15,
@@ -1656,10 +1714,7 @@ const styles = StyleSheet.create({
         flexDirection: "row",
         justifyContent: "space-between",
         alignItems: "center",
-        paddingBottom: 15,
-        marginBottom: 14,
-        borderBottomWidth: 1,
-        borderBottomColor: "#E6E9EE",
+        paddingVertical: 6,
     },
     totalLabel: {
         fontSize: 13,
@@ -1667,11 +1722,10 @@ const styles = StyleSheet.create({
         color: "#7B8492",
     },
     totalValue: {
-        fontSize: 27,
+        fontSize: 18,
         fontWeight: "900",
         color: "#172033",
     },
-
     input: {
         backgroundColor: "#F7F8FA",
         borderWidth: 1,
@@ -1688,7 +1742,6 @@ const styles = StyleSheet.create({
         fontWeight: "700",
         marginBottom: 8,
     },
-
     paymentMethods: {
         flexDirection: "row",
         gap: 8,
@@ -1711,8 +1764,9 @@ const styles = StyleSheet.create({
         fontWeight: "700",
         color: "#596373",
     },
-    paymentButtonTextActive: { color: "#FFFFFF" },
-
+    paymentButtonTextActive: {
+        color: "#FFFFFF",
+    },
     amountInput: {
         backgroundColor: "#F7F8FA",
         borderWidth: 1,
@@ -1730,14 +1784,18 @@ const styles = StyleSheet.create({
         justifyContent: "space-between",
         marginBottom: 14,
     },
-    changeLabel: { color: "#596373", fontWeight: "700" },
+    changeLabel: {
+        color: "#596373",
+        fontWeight: "700",
+    },
     changeValue: {
         color: "#16834A",
         fontSize: 18,
         fontWeight: "900",
     },
-    negativeChange: { color: "#D64545" },
-
+    negativeChange: {
+        color: "#D64545",
+    },
     completeButton: {
         backgroundColor: "#1769E0",
         borderRadius: 11,
@@ -1746,7 +1804,9 @@ const styles = StyleSheet.create({
         justifyContent: "center",
         minHeight: 52,
     },
-    disabledButton: { opacity: 0.7 },
+    disabledButton: {
+        opacity: 0.7,
+    },
     completeButtonText: {
         color: "#FFFFFF",
         fontWeight: "900",
@@ -1754,6 +1814,7 @@ const styles = StyleSheet.create({
         letterSpacing: 0.5,
     },
 
+    // ---- Sales button ---------------------------------------------------
     salesButton: {
         flexDirection: "row",
         alignItems: "center",
@@ -1764,8 +1825,13 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderColor: "#DBEAFE",
     },
-    salesButtonIcon: { fontSize: 28, marginRight: 14 },
-    salesButtonContent: { flex: 1 },
+    salesButtonIcon: {
+        fontSize: 28,
+        marginRight: 14,
+    },
+    salesButtonContent: {
+        flex: 1,
+    },
     salesButtonTitle: {
         fontSize: 16,
         fontWeight: "900",
@@ -1782,6 +1848,7 @@ const styles = StyleSheet.create({
         color: "#1769E0",
     },
 
+    // ---- Quantity modal -------------------------------------------------
     modalOverlay: {
         flex: 1,
         backgroundColor: "rgba(0, 0, 0, 0.5)",
@@ -1897,6 +1964,7 @@ const styles = StyleSheet.create({
         color: "#FFFFFF",
     },
 
+    // ---- Printer button -------------------------------------------------
     printerButton: {
         flexDirection: "row",
         alignItems: "center",
@@ -1907,7 +1975,6 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderColor: "#D7E3F4",
     },
-
     printerButtonIconContainer: {
         width: 46,
         height: 46,
@@ -1917,58 +1984,111 @@ const styles = StyleSheet.create({
         justifyContent: "center",
         marginRight: 14,
     },
-
     printerButtonIcon: {
         fontSize: 23,
     },
-
     printerButtonContent: {
         flex: 1,
     },
-
     printerButtonTitle: {
         fontSize: 16,
         fontWeight: "900",
         color: "#0B1F3A",
     },
-
     printerButtonSubtitle: {
         marginTop: 4,
         fontSize: 12,
         color: "#64748B",
     },
-
     printerButtonArrow: {
         fontSize: 24,
         fontWeight: "800",
         color: "#1769E0",
     },
 
-    productCardOutOfStock: {
-    opacity: 0.6,
-},
-
-stockBadge: {
-    alignSelf: "flex-start",
-    marginTop: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-    backgroundColor: "#DCFCE7",
-},
-
-stockBadgeOut: {
-    backgroundColor: "#FEE2E2",
-},
-
-stockBadgeText: {
-    fontSize: 10,
-    fontWeight: "900",
-    color: "#166534",
-    letterSpacing: 0.5,
-},
-
-stockBadgeTextOut: {
-    color: "#DC2626",
-},
+    // ---- Sale success modal ---------------------------------------------
+    successModalOverlay: {
+        flex: 1,
+        backgroundColor: "rgba(0, 0, 0, 0.5)",
+        justifyContent: "center",
+        alignItems: "center",
+        padding: 24,
+    },
+    successModal: {
+        width: "100%",
+        maxWidth: 400,
+        backgroundColor: "#FFFFFF",
+        borderRadius: 20,
+        padding: 28,
+        alignItems: "center",
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.15,
+        shadowRadius: 24,
+        elevation: 12,
+    },
+    successIconContainer: {
+        width: 64,
+        height: 64,
+        borderRadius: 32,
+        backgroundColor: "#E8F5E9",
+        justifyContent: "center",
+        alignItems: "center",
+        marginBottom: 16,
+    },
+    successIcon: {
+        fontSize: 32,
+        color: "#2E7D32",
+        fontWeight: "700",
+    },
+    successTitle: {
+        fontSize: 22,
+        fontWeight: "700",
+        color: "#111827",
+        marginBottom: 8,
+    },
+    successMessage: {
+        fontSize: 15,
+        color: "#6B7280",
+        textAlign: "center",
+        lineHeight: 22,
+        marginBottom: 24,
+    },
+    successChangeContainer: {
+        width: "100%",
+        backgroundColor: "#E8F5E9",
+        borderRadius: 16,
+        paddingVertical: 20,
+        paddingHorizontal: 24,
+        alignItems: "center",
+        marginBottom: 24,
+        borderWidth: 1,
+        borderColor: "#A5D6A7",
+    },
+    successChangeLabel: {
+        fontSize: 13,
+        fontWeight: "700",
+        color: "#2E7D32",
+        letterSpacing: 1.5,
+        marginBottom: 6,
+    },
+    successChangeValue: {
+        fontSize: 36,
+        fontWeight: "800",
+        color: "#1B5E20",
+    },
+    successButton: {
+        width: "100%",
+        backgroundColor: "#2563EB",
+        borderRadius: 14,
+        paddingVertical: 16,
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    successButtonText: {
+        fontSize: 16,
+        fontWeight: "700",
+        color: "#FFFFFF",
+        letterSpacing: 0.5,
+    },
 });

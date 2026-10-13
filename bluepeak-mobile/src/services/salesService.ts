@@ -75,8 +75,8 @@ function calculateLocalSale(
     }
 
     // Must match backend SaleService.
-    const vat = subtotal * 0.15;
-    const total = subtotal + vat;
+    const vat = subtotal * 0;
+    const total = subtotal;
     const changeGiven =
         sale.amountPaid - total;
 

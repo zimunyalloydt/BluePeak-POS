@@ -1,13 +1,13 @@
 import {
     HubConnection,
     HubConnectionBuilder,
+    HubConnectionState,
     LogLevel,
 } from "@microsoft/signalr";
 
 import { getToken } from "../storage/authStorage";
 
-const HUB_URL =
-    "http://192.168.0.61:5160/notificationHub";
+import { NOTIFICATION_HUB_URL } from "../config/api";
 
 let connection: HubConnection | null = null;
 
@@ -15,9 +15,12 @@ export async function startNotificationConnection(
     userId: number,
     onNotification: (notification: any) => void
 ) {
-    if (connection) {
-        return connection;
-    }
+if (
+    connection &&
+    connection.state === HubConnectionState.Connected
+) {
+    return connection;
+}
 
     const token = await getToken();
 
@@ -28,7 +31,7 @@ export async function startNotificationConnection(
     }
 
     connection = new HubConnectionBuilder()
-        .withUrl(HUB_URL, {
+        .withUrl(NOTIFICATION_HUB_URL, {
             accessTokenFactory: async () => {
                 const currentToken = await getToken();
                 return currentToken ?? "";

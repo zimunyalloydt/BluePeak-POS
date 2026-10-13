@@ -230,6 +230,55 @@ export async function saveProductsLocally(
     );
 }
 
+export async function syncProductsFromServer(
+    products: {
+        productId: number;
+        productCode: string;
+        productName: string;
+        sellingPrice: number;
+        costPrice: number;
+        quantityInStock?: number;
+        imageUrl?: string | null;
+        isActive?: boolean;
+    }[]
+): Promise<void> {
+    const db = await getDatabase();
+
+    await db.withTransactionAsync(async () => {
+        // Find products stored locally.
+        const localProducts = await db.getAllAsync<{
+            id: number;
+        }>("SELECT id FROM products");
+
+        // Identify products that no longer exist on the server.
+        const serverProductIds = new Set(
+            products.map((product) => product.productId)
+        );
+
+        // Delete obsolete products from SQLite.
+        for (const localProduct of localProducts) {
+            if (!serverProductIds.has(localProduct.id)) {
+                await db.runAsync(
+                    "DELETE FROM products WHERE id = ?",
+                    localProduct.id
+                );
+
+                console.log(
+                    `🗑️ Removed obsolete local product ID: ${localProduct.id}`
+                );
+            }
+        }
+    });
+
+    // Insert new products and update existing ones.
+    await saveProductsLocally(products);
+
+    console.log(
+        `✅ SQLite product sync complete. Server products: ${products.length}`
+    );
+}
+
+
 export async function getLocalProducts() {
     const db = await getDatabase();
 

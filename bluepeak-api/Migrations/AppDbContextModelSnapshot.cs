@@ -243,8 +243,20 @@ namespace bluepeak_api.Migrations
                     b.Property<int>("QuantityInStock")
                         .HasColumnType("int");
 
+                    b.Property<int>("ReorderLevel")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ReorderQuantity")
+                        .HasColumnType("int");
+
                     b.Property<decimal>("SellingPrice")
                         .HasColumnType("decimal(18,2)");
+
+                    b.Property<int>("SupplierLeadTimeDays")
+                        .HasColumnType("int");
+
+                    b.Property<int>("TargetStockDays")
+                        .HasColumnType("int");
 
                     b.HasKey("ProductId");
 

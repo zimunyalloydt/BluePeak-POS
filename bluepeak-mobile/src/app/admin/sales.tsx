@@ -71,9 +71,15 @@ function formatDate(dateString: string) {
 function formatTime(dateString: string) {
     const date = new Date(dateString);
 
-    return date.toLocaleTimeString([], {
+    if (Number.isNaN(date.getTime())) {
+        return "";
+    }
+
+    return date.toLocaleTimeString("en-GB", {
+        timeZone: "Africa/Harare",
         hour: "2-digit",
         minute: "2-digit",
+        hourCycle: "h23",
     });
 }
 

@@ -25,8 +25,19 @@ public class Product
     [Column(TypeName = "decimal(18,2)")]
     public decimal CostPrice { get; set; }
 
+    // Current physical stock
     [Required]
-public int QuantityInStock { get; set; } = 0;
+    public int QuantityInStock { get; set; } = 0;
+
+    // Smart inventory settings
+    [Required]
+    public int ReorderLevel { get; set; } = 10;
+
+    [Required]
+    public int ReorderQuantity { get; set; } = 50;
+
+    [Required]
+    public int SupplierLeadTimeDays { get; set; } = 3;
 
     [NotMapped]
     public decimal Profit => SellingPrice - CostPrice;
@@ -35,7 +46,8 @@ public int QuantityInStock { get; set; } = 0;
 
     public bool IsActive { get; set; } = true;
 
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    [Required]
+public int TargetStockDays { get; set; } = 7;
 
-   
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }

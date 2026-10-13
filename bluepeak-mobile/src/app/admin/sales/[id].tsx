@@ -400,9 +400,7 @@ export default function AdminSaleDetails() {
                     </View>
 
                     <View style={styles.moneyRow}>
-                        <Text style={styles.moneyLabel}>
-                            VAT
-                        </Text>
+                       
 
                         <Text style={styles.moneyValue}>
                             {money(sale.vat)}
