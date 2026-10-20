@@ -3,6 +3,8 @@ import {
   PermissionsAndroid,
   Platform,
 } from "react-native";
+import { getUser } from "../storage/authStorage";
+import { API_BASE_URL } from "../config/api";
 
 /* ============================================================
    TYPES
@@ -35,6 +37,7 @@ export interface ReceiptItem {
 export interface Receipt {
   saleId: number;
   saleDate: string;
+  receiptToken?: string | null;
   cashier: string;
   paymentMethod: string;
   subtotal: number;
@@ -43,6 +46,11 @@ export interface Receipt {
   amountPaid: number;
   changeGiven: number;
   customerName?: string | null;
+  organisationName?: string;
+organisationAddress?: string | null;
+organisationPhoneNumber?: string | null;
+organisationEmail?: string | null;
+organisationLogoUrl?: string | null;
   items: ReceiptItem[];
 }
 
@@ -472,7 +480,7 @@ export const printerService = {
   /* ---------- Receipt ---------- */
 
   async printReceipt(receipt: Receipt): Promise<void> {
-    console.log("🧾 Printing Coldstone receipt:", receipt.saleId);
+    console.log("🧾 Printing receipt:", receipt.saleId);
     console.log(
       "🧾 Receipt payload:",
       JSON.stringify(
@@ -492,18 +500,75 @@ export const printerService = {
     await printer.printerInit();
 
     /* ----- HEADER ----- */
-    await printer.printerAlign(1);
-    await printer.printText("COLDSTONE ", {
-      widthtimes: 2,
-      heigthtimes: 1,
-    });
-    await printer.printText("\n", { widthtimes: 1, heigthtimes: 1 });
-    await printer.printText("\n", {});
 
-    /* ----- STORE / INVOICE ----- */
-    await printer.printerAlign(0);
-    await printer.printText("ADDRESS : 2 STIRLING ROAD HARARE\n", {});
-    await printer.printText("CONTACT : 0242750738\n", {});
+/* ----- ORGANISATION HEADER ----- */
+
+const cachedUser = await getUser();
+
+const organisationName =
+    receipt.organisationName?.trim() ||
+    cachedUser?.organisationName?.trim() ||
+    "";
+
+const organisationAddress =
+    receipt.organisationAddress?.trim() ||
+    cachedUser?.organisationAddress?.trim() ||
+    "";
+
+const organisationPhone =
+    receipt.organisationPhoneNumber?.trim() ||
+    cachedUser?.organisationPhoneNumber?.trim() ||
+    "";
+
+const organisationEmail =
+    receipt.organisationEmail?.trim() ||
+    cachedUser?.organisationEmail?.trim() ||
+    "";
+
+console.log("Printing receipt for organisation:", {
+    organisationId: cachedUser?.organisationId,
+    organisationName,
+    organisationAddress,
+    organisationPhone,
+    organisationEmail
+});
+
+await printer.printerAlign(1);
+
+if (organisationName) {
+    await printer.printText(`${organisationName}\n`, {
+        widthtimes: 2,
+        heigthtimes: 1,
+    });
+}
+
+await printer.printText("\n", {});
+
+/* ----- STORE / INVOICE ----- */
+
+await printer.printerAlign(0);
+
+if (organisationAddress) {
+    await printer.printText(
+        `ADDRESS : ${organisationAddress}\n`,
+        {}
+    );
+}
+
+if (organisationPhone) {
+    await printer.printText(
+        `CONTACT : ${organisationPhone}\n`,
+        {}
+    );
+}
+
+if (organisationEmail) {
+    await printer.printText(
+        `EMAIL : ${organisationEmail}\n`,
+        {}
+    );
+}
+
     await printer.printText(`Invoice: ${receipt.saleId}\n`, {});
     await printer.printText(
       `${formatReceiptDate(receipt.saleDate)}\n`,
@@ -592,18 +657,38 @@ export const printerService = {
       );
     }
 
-    /* ----- CASHIER ----- */
-    await printer.printText(LINE, {});
-    await printer.printText(`Sales Person: ${receipt.cashier}\n`, {});
+/* ----- CASHIER ----- */
+await printer.printText(LINE, {});
+await printer.printText(`Sales Person: ${receipt.cashier}\n`, {});
 
-    /* ----- FOOTER ----- */
-    await printer.printText(LINE, {});
-    await printer.printerAlign(1);
+/* ----- RECEIPT VERIFICATION QR CODE ----- */
+await printer.printText(LINE, {});
+await printer.printerAlign(1);
 
-    await printer.printText("Thank you for shopping with us\n", {});
-    await printer.printText("Please come back soon\n\n", { cut: true });
+if (receipt.receiptToken) {
+  const serverRoot = API_BASE_URL.replace(/\/api\/?$/, "");
+
+  const verificationUrl =
+    `${serverRoot}/verify-receipt.html?token=${encodeURIComponent(
+      receipt.receiptToken
+    )}`;
+
+  console.log("🧾 Receipt verification URL:", verificationUrl);
+
+  await printer.printText("SCAN TO VERIFY RECEIPT\n", {});
+  await printer.printQRCode(verificationUrl, 6, 1);
+  await printer.printText("\n", {});
+} else {
+  console.warn(
+    "⚠️ Receipt has no verification token; QR code skipped."
+  );
+}
+
+/* ----- FOOTER ----- */
+await printer.printText("Thank you for shopping with us\n", {});
+await printer.printText("Please come back soon\n\n", { cut: true });
 
     console.log("✂️ Receipt printed and cutter command sent.");
-    console.log("✅ Coldstone receipt printed successfully.");
+   console.log("✅ Receipt printed successfully.");
   },
 };

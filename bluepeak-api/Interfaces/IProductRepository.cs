@@ -4,13 +4,26 @@ namespace bluepeak_api.Interfaces;
 
 public interface IProductRepository : IGenericRepository<Product>
 {
-    Task<Product?> GetByProductIdAsync(int productId);
+    Task<IEnumerable<Product>> GetAllByOrganisationAsync(
+        int organisationId);
 
-    Task<Product?> GetByCodeAsync(string productCode);
+    Task<Product?> GetByProductIdAsync(
+        int productId,
+        int organisationId);
 
-    Task<Product?> GetByBarcodeAsync(string barcode);
+    Task<Product?> GetByCodeAsync(
+        string productCode,
+        int organisationId);
 
-    Task<IEnumerable<Product>> SearchAsync(string search);
+    Task<Product?> GetByBarcodeAsync(
+        string barcode,
+        int organisationId);
 
-    Task<bool> ProductCodeExistsAsync(string productCode);
+    Task<IEnumerable<Product>> SearchAsync(
+        string search,
+        int organisationId);
+
+    Task<bool> ProductCodeExistsAsync(
+        string productCode,
+        int organisationId);
 }

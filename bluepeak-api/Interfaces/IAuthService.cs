@@ -7,4 +7,7 @@ public interface IAuthService
     Task<LoginResponseDto?> LoginAsync(LoginRequestDto request);
 
     Task<bool> RegisterAsync(RegisterUserDto request);
+
+    Task<OrganisationRegistrationResultDto> RegisterOrganisationAsync(
+        RegisterOrganisationDto request);
 }

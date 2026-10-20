@@ -15,25 +15,34 @@ public class AuthController : ControllerBase
         _authService = authService;
     }
 
-    [HttpPost("register")]
-    public async Task<IActionResult> Register(RegisterUserDto request)
-    {
-        var result = await _authService.RegisterAsync(request);
-
-        if (!result)
-            return BadRequest("Username already exists.");
-
-        return Ok("User created successfully.");
-    }
-
     [HttpPost("login")]
     public async Task<IActionResult> Login(LoginRequestDto request)
     {
         var result = await _authService.LoginAsync(request);
 
         if (result == null)
-            return Unauthorized("Invalid username or password.");
+        {
+            return Unauthorized(
+                "Invalid username, password or organisation code.");
+        }
 
         return Ok(result);
+    }
+
+    [HttpPost("register-organisation")]
+    public async Task<IActionResult> RegisterOrganisation(
+        [FromBody] RegisterOrganisationDto request)
+    {
+        var result =
+            await _authService.RegisterOrganisationAsync(request);
+
+        if (!result.Success)
+        {
+            return Conflict(result);
+        }
+
+        return StatusCode(
+            StatusCodes.Status201Created,
+            result);
     }
 }

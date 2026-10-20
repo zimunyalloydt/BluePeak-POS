@@ -1,4 +1,3 @@
-
 import React, {
     createContext,
     useContext,
@@ -13,66 +12,72 @@ import {
     saveAuth,
     saveOfflineAuth,
     verifyOfflineLogin,
+    type StoredAuthUser,
 } from "../storage/authStorage";
 
 import { login as apiLogin } from "../services/authService";
 
-export type User = {
-    userId: number;
-    fullName: string;
-    username: string;
-    role: string;
-    permissions: string[];
-};
+import {
+    initializeLocalDatabase,
+    setActiveOrganisation,
+} from "../services/localDatabase";
+
+export type User = StoredAuthUser;
 
 type AuthContextType = {
     user: User | null;
     token: string | null;
     loading: boolean;
     login: (
+        organisationCode: string,
         username: string,
         password: string
     ) => Promise<User>;
     logout: () => Promise<void>;
 };
 
-const AuthContext = createContext<
-    AuthContextType | undefined
->(undefined);
+const AuthContext = createContext<AuthContextType | undefined>(
+    undefined
+);
 
 export function AuthProvider({
     children,
 }: {
     children: React.ReactNode;
 }) {
-    const [user, setUser] =
-        useState<User | null>(null);
-
-    const [token, setToken] =
-        useState<string | null>(null);
-
-    const [loading, setLoading] =
-        useState(true);
+    const [user, setUser] = useState<User | null>(null);
+    const [token, setToken] = useState<string | null>(null);
+    const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        restoreSession();
+        void restoreSession();
     }, []);
 
     const restoreSession = async () => {
         try {
-            const storedToken =
-                await getToken();
+            const storedToken = await getToken();
+            const storedUser = await getUser();
 
-            const storedUser =
-                await getUser();
+            if (
+                storedToken &&
+                storedUser &&
+                storedUser.organisationId > 0 &&
+                storedUser.organisationCode
+            ) {
+                await setActiveOrganisation(
+                    storedUser.organisationId
+                );
 
-            if (storedToken && storedUser) {
+                await initializeLocalDatabase();
+
                 setToken(storedToken);
                 setUser(storedUser);
+            } else {
+                await clearAuth();
             }
         } catch (error) {
             console.error(
-                "Failed to restore session:",
+                "Failed to restore authenticated session:",
                 error
             );
         } finally {
@@ -81,122 +86,139 @@ export function AuthProvider({
     };
 
     const login = async (
+        organisationCode: string,
         username: string,
         password: string
     ): Promise<User> => {
+        const normalisedCode =
+            organisationCode.trim().toUpperCase();
+
+        const normalisedUsername = username.trim();
+
+        if (
+            !normalisedCode ||
+            !normalisedUsername ||
+            !password
+        ) {
+            throw new Error(
+                "Organisation code, username and password are required."
+            );
+        }
+
+        let authenticatedUser: User;
+        let authenticatedToken: string | null = null;
+        let online = false;
+
         try {
-            console.log(
-                "🔐 Attempting online login..."
-            );
-
             const result = await apiLogin(
-                username,
-                password
+                normalisedUsername,
+                password,
+                normalisedCode
             );
 
-            const userData: User = {
+            authenticatedUser = {
                 userId: result.userId,
                 fullName: result.fullName,
                 username: result.username,
                 role: result.role,
-                permissions:
-                    result.permissions,
+                permissions: result.permissions ?? [],
+                organisationId: result.organisationId,
+                organisationName: result.organisationName,
+                organisationCode: result.organisationCode,
+                organisationAddress: result.organisationAddress,
+organisationPhoneNumber: result.organisationPhoneNumber,
+organisationEmail: result.organisationEmail,
+organisationLogoUrl: result.organisationLogoUrl,
             };
 
-            // Save normal active session.
-            await saveAuth(
-                result.token,
-                userData
-            );
-
-            // Save offline authentication.
-            await saveOfflineAuth(
-                username,
-                password,
-                userData
-            );
-
-            setToken(result.token);
-            setUser(userData);
-
-            console.log(
-                "✅ Online login successful"
-            );
-
-            return userData;
+            authenticatedToken = result.token;
+            online = true;
         } catch (error: any) {
-            /*
-             * IMPORTANT:
-             *
-             * If the API actually responded with
-             * 401/403/etc, do NOT try offline login.
-             *
-             * Offline login is only attempted when
-             * there is no HTTP response, which normally
-             * means network/server connectivity failure.
-             */
+            // Never use offline login to bypass a server rejection.
             if (error?.response) {
-                console.log(
-                    "❌ Server rejected login:",
-                    error.response.status
-                );
-
                 throw error;
             }
 
-            console.log(
-                "📴 Network unavailable. Trying offline login..."
+            const offlineUser = await verifyOfflineLogin(
+                normalisedCode,
+                normalisedUsername,
+                password
             );
 
-            const offlineUser =
-                await verifyOfflineLogin(
-                    username,
-                    password
-                );
-
             if (!offlineUser) {
-                console.log(
-                    "❌ Offline login failed"
-                );
-
                 throw new Error(
-                    "No internet connection and the username or password is not available for offline login."
+                    "You are offline, and no matching offline account was found for this organisation."
                 );
             }
 
-            /*
-             * We don't have a fresh server token
-             * while offline.
-             *
-             * The cached token is restored so the
-             * application can maintain its existing
-             * authenticated state. Offline operations
-             * should remain local until synchronization
-             * is available.
-             */
-            const storedToken =
-                await getToken();
+            authenticatedUser = offlineUser;
+        }
 
-            setToken(storedToken);
-            setUser(offlineUser);
+        if (
+            !Number.isInteger(authenticatedUser.organisationId) ||
+            authenticatedUser.organisationId < 1 ||
+            authenticatedUser.organisationCode.trim().toUpperCase() !==
+                normalisedCode
+        ) {
+            throw new Error(
+                "The authenticated account's organisation details are invalid."
+            );
+        }
 
-            console.log(
-                "✅ Offline login successful"
+        /*
+         * Select and initialize the organisation database before
+         * allowing the application to navigate to its main screens.
+         */
+        try {
+            await setActiveOrganisation(
+                authenticatedUser.organisationId
             );
 
-            return offlineUser;
+            await initializeLocalDatabase();
+        } catch (error) {
+            console.error(
+                "Failed to initialize organisation database:",
+                error
+            );
+
+            throw new Error(
+                "Could not open this organisation's local database. Please try again."
+            );
         }
+
+        if (online && authenticatedToken) {
+            await saveAuth(
+                authenticatedToken,
+                authenticatedUser
+            );
+
+            await saveOfflineAuth(
+                normalisedUsername,
+                password,
+                authenticatedUser
+            );
+
+            setToken(authenticatedToken);
+        } else {
+            /*
+             * Offline login has no valid server token.
+             * Never retain a token from a previous session.
+             */
+            await clearAuth();
+            setToken(null);
+        }
+
+        setUser(authenticatedUser);
+
+        console.log(
+            `${online ? "Online" : "Offline"} login successful for ${authenticatedUser.organisationName}`
+        );
+
+        return authenticatedUser;
     };
 
     const logout = async () => {
-        /*
-         * Only clear the active session.
-         *
-         * Keep offline credentials so this device
-         * can still authenticate without internet.
-         */
         await clearAuth();
-
         setToken(null);
         setUser(null);
     };
@@ -217,8 +239,7 @@ export function AuthProvider({
 }
 
 export function useAuth() {
-    const context =
-        useContext(AuthContext);
+    const context = useContext(AuthContext);
 
     if (!context) {
         throw new Error(

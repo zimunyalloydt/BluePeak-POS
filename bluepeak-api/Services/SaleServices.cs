@@ -10,22 +10,42 @@ public class SaleService : ISaleService
 {
     private readonly AppDbContext _context;
     private readonly ISaleRepository _repository;
+    private readonly IOrganisationContext _organisationContext;
 
     public SaleService(
         AppDbContext context,
-        ISaleRepository repository)
+        ISaleRepository repository,
+        IOrganisationContext organisationContext)
     {
         _context = context;
         _repository = repository;
+        _organisationContext = organisationContext;
     }
 
-    public async Task<int> ProcessSaleAsync(CreateSaleDto dto, int userId)
+    public async Task<int> ProcessSaleAsync(
+        CreateSaleDto dto,
+        int userId)
     {
-        bool isAdmin = await _context.Users
+        // The organisation comes from the authenticated user's token.
+        // Never trust an organisation ID supplied by the mobile app.
+        int organisationId = _organisationContext.OrganisationId;
+
+        // Verify that the cashier belongs to this organisation.
+        var user = await _context.Users
             .Include(u => u.Role)
-            .AnyAsync(u =>
+            .FirstOrDefaultAsync(u =>
                 u.UserId == userId &&
-                u.Role!.RoleName == "Admin");
+                u.OrganisationId == organisationId &&
+                u.IsActive);
+
+        if (user == null)
+        {
+            throw new UnauthorizedAccessException(
+                "Your account is inactive or does not belong to this organisation.");
+        }
+
+        // Check the cashier's selling permission.
+        bool isAdmin = user.Role?.RoleName == "Admin";
 
         if (!isAdmin)
         {
@@ -42,30 +62,45 @@ public class SaleService : ISaleService
             }
         }
 
-        // Prevent duplicate sales when an offline sale is retried.
+        // Preserve offline retry protection within the organisation.
         if (string.IsNullOrWhiteSpace(dto.ClientSaleId))
         {
             throw new ArgumentException(
                 "ClientSaleId is required.");
         }
 
+        var clientSaleId = dto.ClientSaleId.Trim();
+
         var existingSale = await _context.Sales
             .FirstOrDefaultAsync(s =>
-                s.ClientSaleId == dto.ClientSaleId);
+                s.OrganisationId == organisationId &&
+                s.ClientSaleId == clientSaleId);
 
         if (existingSale != null)
         {
             return existingSale.SaleId;
         }
 
+        if (dto.Items == null || dto.Items.Count == 0)
+        {
+            throw new ArgumentException(
+                "A sale must contain at least one item.");
+        }
+
         using var transaction =
             await _context.Database.BeginTransactionAsync();
 
-        decimal subtotal = 0;
+        decimal subtotal = 0m;
+
+        var receiptToken = string.IsNullOrWhiteSpace(dto.ReceiptToken)
+            ? Guid.NewGuid().ToString("N")
+            : dto.ReceiptToken.Trim();
 
         var sale = new Sale
         {
-            ClientSaleId = dto.ClientSaleId,
+            ClientSaleId = clientSaleId,
+            ReceiptToken = receiptToken,
+            OrganisationId = organisationId,
             UserId = userId,
             CustomerName = dto.CustomerName,
             PaymentMethod = dto.PaymentMethod,
@@ -75,59 +110,62 @@ public class SaleService : ISaleService
 
         foreach (var item in dto.Items)
         {
+            if (item.Quantity <= 0)
+            {
+                throw new ArgumentException(
+                    "Sale quantities must be greater than zero.");
+            }
+
+            // Only retrieve products owned by this organisation.
             var product = await _context.Products
-                .FirstOrDefaultAsync(x =>
-                    x.ProductId == item.ProductId);
+                .FirstOrDefaultAsync(p =>
+                    p.ProductId == item.ProductId &&
+                    p.OrganisationId == organisationId &&
+                    p.IsActive);
 
             if (product == null)
             {
-                throw new Exception(
-                    $"Product {item.ProductId} not found.");
+                throw new InvalidOperationException(
+                    $"Product {item.ProductId} was not found, is inactive, " +
+                    "or does not belong to your organisation.");
             }
 
-          if (item.Quantity <= 0)
-{
-    throw new ArgumentException(
-        $"Invalid quantity for {product.ProductName}.");
-}
+            if (product.QuantityInStock <= 0)
+            {
+                throw new InvalidOperationException(
+                    $"{product.ProductName} is out of stock.");
+            }
 
-if (product.QuantityInStock <= 0)
-{
-    throw new InvalidOperationException(
-        $"{product.ProductName} is out of stock.");
-}
+            if (product.QuantityInStock < item.Quantity)
+            {
+                throw new InvalidOperationException(
+                    $"Only {product.QuantityInStock} unit(s) of " +
+                    $"{product.ProductName} are available.");
+            }
 
-if (product.QuantityInStock < item.Quantity)
-{
-    throw new InvalidOperationException(
-        $"Only {product.QuantityInStock} unit(s) of " +
-        $"{product.ProductName} are available.");
-}
+            // Deduct stock only from the organisation's own product.
+            product.QuantityInStock -= item.Quantity;
 
-product.QuantityInStock -= item.Quantity;
-
-            decimal total =
+            decimal itemTotal =
                 product.SellingPrice * item.Quantity;
 
-            subtotal += total;
+            subtotal += itemTotal;
 
             sale.Items.Add(new SaleItem
             {
                 ProductId = product.ProductId,
                 Quantity = item.Quantity,
                 UnitPrice = product.SellingPrice,
-                Total = total
+                Total = itemTotal
             });
         }
 
         sale.Subtotal = subtotal;
         sale.Vat = 0m;
-sale.Total = sale.Subtotal;
-        sale.ChangeGiven =
-            sale.AmountPaid - sale.Total;
+        sale.Total = sale.Subtotal;
+        sale.ChangeGiven = sale.AmountPaid - sale.Total;
 
         await _repository.AddSaleAsync(sale);
-
         await _repository.SaveChangesAsync();
 
         await transaction.CommitAsync();
@@ -138,8 +176,13 @@ sale.Total = sale.Subtotal;
     public async Task<List<SaleHistoryDto>> GetMySalesAsync(
         int userId)
     {
+        int organisationId = _organisationContext.OrganisationId;
+
+        // Do not expose sales outside the current organisation.
         return await _context.Sales
-            .Where(s => s.UserId == userId)
+            .Where(s =>
+                s.OrganisationId == organisationId &&
+                s.UserId == userId)
             .OrderByDescending(s => s.SaleDate)
             .Select(s => new SaleHistoryDto
             {
@@ -156,42 +199,62 @@ sale.Total = sale.Subtotal;
     public async Task<SaleReceiptDto?> GetReceiptAsync(
         int saleId)
     {
-        var sale = await _context.Sales
-            .Include(s => s.User)
-            .Include(s => s.Items)
-                .ThenInclude(i => i.Product)
+        int organisationId = _organisationContext.OrganisationId;
+
+        // A receipt can only be retrieved within its organisation.
+      
+      var sale = await _context.Sales
+    .Include(s => s.User)
+    .Include(s => s.Organisation)
+    .Include(s => s.Items)
+        .ThenInclude(i => i.Product)
             .FirstOrDefaultAsync(s =>
-                s.SaleId == saleId);
+                s.SaleId == saleId &&
+                s.OrganisationId == organisationId);
 
         if (sale == null)
+        {
             return null;
+        }
 
-      return new SaleReceiptDto
-{
-    SaleId = sale.SaleId,
-    SaleDate = sale.SaleDate,
-
-    Cashier =
-        sale.User?.FirstName +
-        " " +
-        sale.User?.LastName,
-  CustomerName = sale.CustomerName,
-    PaymentMethod = sale.PaymentMethod,
+        return new SaleReceiptDto
+        {
+            SaleId = sale.SaleId,
+            SaleDate = sale.SaleDate,
+            ReceiptToken = sale.ReceiptToken,
+            Cashier =
+                sale.User?.FirstName +
+                " " +
+                sale.User?.LastName,
+            CustomerName = sale.CustomerName,
+            PaymentMethod = sale.PaymentMethod,
             Subtotal = sale.Subtotal,
             Vat = sale.Vat,
             Total = sale.Total,
             AmountPaid = sale.AmountPaid,
             ChangeGiven = sale.ChangeGiven,
+            OrganisationName =
+    sale.Organisation?.Name ?? string.Empty,
 
-            Items = sale.Items.Select(i =>
-                new SaleReceiptItemDto
-                {
-                    ProductName =
-                        i.Product!.ProductName,
-                    Quantity = i.Quantity,
-                    UnitPrice = i.UnitPrice,
-                    Total = i.Total
-                }).ToList()
+OrganisationAddress =
+    sale.Organisation?.Address,
+
+OrganisationPhoneNumber =
+    sale.Organisation?.PhoneNumber,
+
+OrganisationEmail =
+    sale.Organisation?.Email,
+
+OrganisationLogoUrl =
+    sale.Organisation?.LogoUrl,
+
+            Items = sale.Items.Select(i => new SaleReceiptItemDto
+            {
+                ProductName = i.Product!.ProductName,
+                Quantity = i.Quantity,
+                UnitPrice = i.UnitPrice,
+                Total = i.Total
+            }).ToList()
         };
     }
 }

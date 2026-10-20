@@ -120,6 +120,54 @@ namespace bluepeak_api.Migrations
                     b.ToTable("Notifications");
                 });
 
+            modelBuilder.Entity("bluepeak_api.Models.Organisation", b =>
+                {
+                    b.Property<int>("OrganisationId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("OrganisationId"));
+
+                    b.Property<string>("Address")
+                        .HasMaxLength(200)
+                        .HasColumnType("varchar(200)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<string>("Email")
+                        .HasMaxLength(150)
+                        .HasColumnType("varchar(150)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("tinyint(1)");
+
+                    b.Property<string>("LogoUrl")
+                        .HasMaxLength(255)
+                        .HasColumnType("varchar(255)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("varchar(150)");
+
+                    b.Property<string>("OrganisationCode")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("varchar(100)");
+
+                    b.Property<string>("PhoneNumber")
+                        .HasMaxLength(30)
+                        .HasColumnType("varchar(30)");
+
+                    b.HasKey("OrganisationId");
+
+                    b.HasIndex("OrganisationCode")
+                        .IsUnique();
+
+                    b.ToTable("Organisations");
+                });
+
             modelBuilder.Entity("bluepeak_api.Models.Permission", b =>
                 {
                     b.Property<int>("PermissionId")
@@ -230,6 +278,9 @@ namespace bluepeak_api.Migrations
                     b.Property<bool>("IsActive")
                         .HasColumnType("tinyint(1)");
 
+                    b.Property<int>("OrganisationId")
+                        .HasColumnType("int");
+
                     b.Property<string>("ProductCode")
                         .IsRequired()
                         .HasMaxLength(30)
@@ -261,6 +312,9 @@ namespace bluepeak_api.Migrations
                     b.HasKey("ProductId");
 
                     b.HasIndex("CategoryId");
+
+                    b.HasIndex("OrganisationId", "ProductCode")
+                        .IsUnique();
 
                     b.ToTable("Products");
                 });
@@ -454,9 +508,15 @@ namespace bluepeak_api.Migrations
                     b.Property<string>("CustomerName")
                         .HasColumnType("longtext");
 
+                    b.Property<int>("OrganisationId")
+                        .HasColumnType("int");
+
                     b.Property<string>("PaymentMethod")
                         .IsRequired()
                         .HasColumnType("longtext");
+
+                    b.Property<string>("ReceiptToken")
+                        .HasColumnType("varchar(255)");
 
                     b.Property<DateTime>("SaleDate")
                         .HasColumnType("datetime(6)");
@@ -475,10 +535,13 @@ namespace bluepeak_api.Migrations
 
                     b.HasKey("SaleId");
 
-                    b.HasIndex("ClientSaleId")
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("OrganisationId", "ClientSaleId")
                         .IsUnique();
 
-                    b.HasIndex("UserId");
+                    b.HasIndex("OrganisationId", "ReceiptToken")
+                        .IsUnique();
 
                     b.ToTable("Sales");
                 });
@@ -619,6 +682,9 @@ namespace bluepeak_api.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("varchar(50)");
 
+                    b.Property<int>("OrganisationId")
+                        .HasColumnType("int");
+
                     b.Property<string>("PasswordHash")
                         .IsRequired()
                         .HasColumnType("longtext");
@@ -636,6 +702,8 @@ namespace bluepeak_api.Migrations
                         .HasColumnType("varchar(50)");
 
                     b.HasKey("UserId");
+
+                    b.HasIndex("OrganisationId");
 
                     b.HasIndex("RoleId");
 
@@ -692,6 +760,14 @@ namespace bluepeak_api.Migrations
                     b.HasOne("bluepeak_api.Models.Category", null)
                         .WithMany("Products")
                         .HasForeignKey("CategoryId");
+
+                    b.HasOne("bluepeak_api.Models.Organisation", "Organisation")
+                        .WithMany()
+                        .HasForeignKey("OrganisationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Organisation");
                 });
 
             modelBuilder.Entity("bluepeak_api.Models.Refund", b =>
@@ -776,11 +852,19 @@ namespace bluepeak_api.Migrations
 
             modelBuilder.Entity("bluepeak_api.Models.Sale", b =>
                 {
+                    b.HasOne("bluepeak_api.Models.Organisation", "Organisation")
+                        .WithMany()
+                        .HasForeignKey("OrganisationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
                     b.HasOne("bluepeak_api.Models.User", "User")
                         .WithMany()
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.Navigation("Organisation");
 
                     b.Navigation("User");
                 });
@@ -836,11 +920,19 @@ namespace bluepeak_api.Migrations
 
             modelBuilder.Entity("bluepeak_api.Models.User", b =>
                 {
+                    b.HasOne("bluepeak_api.Models.Organisation", "Organisation")
+                        .WithMany()
+                        .HasForeignKey("OrganisationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
                     b.HasOne("bluepeak_api.Models.Role", "Role")
                         .WithMany("Users")
                         .HasForeignKey("RoleId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.Navigation("Organisation");
 
                     b.Navigation("Role");
                 });

@@ -1,4 +1,5 @@
 using bluepeak_api.Data;
+using bluepeak_api.Interfaces;
 using bluepeak_api.DTOs.Inventory;
 using bluepeak_api.Services.Interfaces;
 using Microsoft.EntityFrameworkCore;
@@ -8,16 +9,24 @@ namespace bluepeak_api.Services;
 public class InventoryPredictionService : IInventoryPredictionService
 {
     private readonly AppDbContext _context;
+    private readonly IOrganisationContext _organisationContext;
 
-    public InventoryPredictionService(AppDbContext context)
+    public InventoryPredictionService(
+        AppDbContext context,
+        IOrganisationContext organisationContext)
     {
         _context = context;
+        _organisationContext = organisationContext;
     }
 
     public async Task<List<InventoryPredictionDto>> GetPredictionsAsync()
     {
+        var organisationId = _organisationContext.OrganisationId;
+
         var products = await _context.Products
-            .Where(p => p.IsActive)
+            .Where(p =>
+                p.OrganisationId == organisationId &&
+                p.IsActive)
             .ToListAsync();
 
         var now = DateTime.UtcNow;
@@ -30,6 +39,7 @@ public class InventoryPredictionService : IInventoryPredictionService
             .Include(si => si.Sale)
             .Where(si =>
                 si.Sale != null &&
+                si.Sale.OrganisationId == organisationId &&
                 si.Sale.SaleDate >= thirtyDaysAgo)
             .Select(si => new
             {

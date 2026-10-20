@@ -12,5 +12,5 @@ public interface IMessageService
 
     Task<int> GetUnreadCountAsync(int userId);
 
-    Task MarkAsReadAsync(int messageId);
+    Task MarkAsReadAsync(int messageId, int userId);
 }

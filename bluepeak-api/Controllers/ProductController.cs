@@ -1,10 +1,12 @@
 using Microsoft.AspNetCore.Mvc;
 using bluepeak_api.DTOs.Products;
 using bluepeak_api.Interfaces;
+using Microsoft.AspNetCore.Authorization;
 
 namespace bluepeak_api.Controllers;
 
 [ApiController]
+[Authorize]
 [Route("api/[controller]")]
 public class ProductController : ControllerBase
 {
@@ -38,33 +40,25 @@ public class ProductController : ControllerBase
         return Ok(await _service.SearchAsync(q));
     }
 
-    [HttpPost]
-    public async Task<IActionResult> Create([FromForm] CreateProductDto dto)
+ [HttpPost]
+public async Task<IActionResult> Create([FromForm] CreateProductDto dto)
+{
+    try
     {
-Console.WriteLine("========== CREATE PRODUCT ==========");
-
-if (dto.Image == null)
-{
-    Console.WriteLine("IMAGE IS NULL");
-}
-else
-{
-    Console.WriteLine($"IMAGE RECEIVED: {dto.Image.FileName}");
-    Console.WriteLine($"SIZE: {dto.Image.Length}");
-}
-        
         var result = await _service.CreateAsync(dto);
 
         if (!result)
+        {
             return BadRequest("Product code already exists.");
-
-
-            
+        }
 
         return Ok("Product created.");
-
-        
     }
+    catch (UnauthorizedAccessException)
+    {
+        return Forbid();
+    }
+}
 
     [HttpPost("{id:int}/stock/add")]
 public async Task<IActionResult> AddStock(

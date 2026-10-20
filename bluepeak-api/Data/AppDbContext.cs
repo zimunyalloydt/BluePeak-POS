@@ -9,7 +9,8 @@ public class AppDbContext : DbContext
         : base(options)
     {
     }
-
+public DbSet<Organisation> Organisations =>
+    Set<Organisation>();
     public DbSet<Role> Roles => Set<Role>();
     public DbSet<Permission> Permissions => Set<Permission>();
 
@@ -38,8 +39,32 @@ public DbSet<RefundItem> RefundItems => Set<RefundItem>();
     {
         base.OnModelCreating(modelBuilder);
 
-        modelBuilder.Entity<Sale>()
-    .HasIndex(s => s.ClientSaleId)
+
+modelBuilder.Entity<Organisation>()
+    .HasIndex(o => o.OrganisationCode)
+    .IsUnique();
+        modelBuilder.Entity<Product>()
+    .HasIndex(p => new
+    {
+        p.OrganisationId,
+        p.ProductCode
+    })
+    .IsUnique();
+
+      modelBuilder.Entity<Sale>()
+    .HasIndex(s => new
+    {
+        s.OrganisationId,
+        s.ClientSaleId
+    })
+    .IsUnique();
+
+modelBuilder.Entity<Sale>()
+    .HasIndex(s => new
+    {
+        s.OrganisationId,
+        s.ReceiptToken
+    })
     .IsUnique();
 
         modelBuilder.Entity<RefundRequest>()

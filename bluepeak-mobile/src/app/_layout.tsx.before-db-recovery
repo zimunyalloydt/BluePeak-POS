@@ -1,0 +1,85 @@
+import { useEffect, useState } from "react";
+import { Stack } from "expo-router";
+
+import { AuthProvider, useAuth } from "../context/AuthContext";
+import {
+    initializeLocalDatabase,
+    setActiveOrganisation,
+} from "../services/localDatabase";
+import { startNetworkSync } from "../services/networkSyncService";
+
+function AuthenticatedApp() {
+    const { user, token, loading } = useAuth();
+    const [databaseReady, setDatabaseReady] = useState(false);
+
+    useEffect(() => {
+        let cancelled = false;
+        let stopNetworkSync: (() => void) | undefined;
+
+        const prepareOrganisation = async () => {
+            setDatabaseReady(false);
+
+            if (loading || !user) {
+                return;
+            }
+
+            try {
+                await setActiveOrganisation(user.organisationId);
+                await initializeLocalDatabase();
+
+                if (cancelled) {
+                    return;
+                }
+
+                setDatabaseReady(true);
+
+                /*
+                 * Synchronization is permitted only for an online
+                 * authenticated session with a server token.
+                 */
+                if (token) {
+                    stopNetworkSync = startNetworkSync();
+                }
+            } catch (error) {
+                console.error(
+                    "Organisation initialization failed:",
+                    error
+                );
+            }
+        };
+
+        void prepareOrganisation();
+
+        return () => {
+            cancelled = true;
+
+            if (stopNetworkSync) {
+                stopNetworkSync();
+            }
+        };
+    }, [user?.organisationId, token, loading]);
+
+    /*
+     * Do not render authenticated application screens until the
+     * organisation database has been selected and initialized.
+     */
+    if (loading || (user && !databaseReady)) {
+        return null;
+    }
+
+    return (
+        <Stack
+            screenOptions={{
+                headerShown: false,
+            }}
+        />
+    );
+}
+
+export default function RootLayout() {
+    return (
+        <AuthProvider>
+            <AuthenticatedApp />
+        </AuthProvider>
+    );
+}

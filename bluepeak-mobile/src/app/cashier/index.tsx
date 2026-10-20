@@ -57,6 +57,16 @@ import { API_SERVER } from "../../config/api";
 export default function CashierScreen() {
     const router = useRouter();
     const { user, logout } = useAuth();
+    console.log("CASHIER SCREEN MOUNTED", {
+    userId: user?.userId,
+    username: user?.username,
+    organisationId: user?.organisationId,
+});
+    console.log("CASHIER SCREEN MOUNTED", {
+    userId: user?.userId,
+    username: user?.username,
+    organisationId: user?.organisationId,
+});
     const { width } = useWindowDimensions();
 
     const numColumns = width >= 768 ? 3 : 2;

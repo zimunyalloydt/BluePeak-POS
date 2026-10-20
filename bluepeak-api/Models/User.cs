@@ -27,6 +27,10 @@ public class User
     [MaxLength(20)]
     public string? Phone { get; set; }
 
+    public int OrganisationId { get; set; }
+
+public Organisation? Organisation { get; set; }
+
     [Required]
     public string PasswordHash { get; set; } = string.Empty;
 

@@ -1,9 +1,11 @@
 import { useState } from "react";
 import {
+    ActivityIndicator,
     Alert,
     KeyboardAvoidingView,
     Platform,
     Pressable,
+    ScrollView,
     StyleSheet,
     Text,
     TextInput,
@@ -14,15 +16,22 @@ import { useAuth } from "../context/AuthContext";
 
 export default function LoginScreen() {
     const { login } = useAuth();
+
+    const [organisationCode, setOrganisationCode] =
+        useState("COLDSTONE");
     const [username, setUsername] = useState("");
     const [password, setPassword] = useState("");
     const [loading, setLoading] = useState(false);
 
     const handleLogin = async () => {
-        if (!username.trim() || !password) {
+        if (
+            !organisationCode.trim() ||
+            !username.trim() ||
+            !password
+        ) {
             Alert.alert(
                 "Login required",
-                "Please enter your username and password."
+                "Please enter your organisation code, username and password."
             );
             return;
         }
@@ -31,11 +40,22 @@ export default function LoginScreen() {
             setLoading(true);
 
             const loggedInUser = await login(
+                organisationCode.trim().toUpperCase(),
                 username.trim(),
                 password
             );
 
-            const role = loggedInUser.role.toLowerCase();
+            const role = String(
+                loggedInUser.role ?? ""
+            ).toLowerCase();
+
+            console.log("LOGIN NAVIGATION:", {
+                role,
+                organisationId:
+                    loggedInUser.organisationId,
+                organisationCode:
+                    loggedInUser.organisationCode,
+            });
 
             if (role === "cashier") {
                 router.replace("/cashier");
@@ -49,11 +69,10 @@ export default function LoginScreen() {
             } else {
                 router.replace("/dashboard");
             }
-                } catch (error: any) {
+        } catch (error: any) {
             console.log(
                 "LOGIN ERROR:",
-                error?.response?.data ||
-                    error?.message
+                error?.response?.data || error?.message
             );
 
             let message =
@@ -61,20 +80,37 @@ export default function LoginScreen() {
 
             if (error?.response?.status === 401) {
                 message =
-                    "Invalid username or password.";
+                    "Invalid organisation code, username or password. Check your details and try again.";
             } else if (
                 error?.message?.includes(
-                    "No internet connection"
+                    "no matching offline account"
                 )
             ) {
                 message =
-                    "You are offline and this account has not been successfully logged in on this device before.";
+                    "You are offline, and this organisation account has not been configured for offline login on this device.";
+            } else if (
+                error?.message?.includes(
+                    "Network Error"
+                ) ||
+                error?.message?.includes(
+                    "Network request failed"
+                ) ||
+                error?.message?.includes(
+                    "Unable to connect"
+                )
+            ) {
+                message =
+                    "Unable to reach the server. Check your network connection or try your previously cached offline account.";
+            } else if (
+                error?.message?.includes(
+                    "Organisation code, username and password are required"
+                )
+            ) {
+                message =
+                    "Please enter your organisation code, username and password.";
             }
 
-            Alert.alert(
-                "Login failed",
-                message
-            );
+            Alert.alert("Login failed", message);
         } finally {
             setLoading(false);
         }
@@ -89,63 +125,126 @@ export default function LoginScreen() {
                     : undefined
             }
         >
-            <View style={styles.content}>
-                <View style={styles.logoContainer}>
-                    <Text style={styles.logo}>BLUEPEAK</Text>
-                    <Text style={styles.subtitle}>POINT OF SALE</Text>
-                </View>
-
-                <View style={styles.card}>
-                    <Text style={styles.title}>Welcome back</Text>
-
-                    <Text style={styles.label}>
-                        Username
-                    </Text>
-
-                    <TextInput
-                        value={username}
-                        onChangeText={setUsername}
-                        placeholder="Enter your username"
-                        placeholderTextColor="#8B8B8B"
-                        autoCapitalize="none"
-                        autoCorrect={false}
-                        style={styles.input}
-                    />
-
-                    <Text style={styles.label}>
-                        Password
-                    </Text>
-
-                    <TextInput
-                        value={password}
-                        onChangeText={setPassword}
-                        placeholder="Enter your password"
-                        placeholderTextColor="#8B8B8B"
-                        secureTextEntry
-                        autoCapitalize="none"
-                        style={styles.input}
-                    />
-
-                    <Pressable
-                        style={[
-                            styles.button,
-                            loading && styles.buttonDisabled,
-                        ]}
-                        onPress={handleLogin}
-                        disabled={loading}
-                    >
-                        <Text style={styles.buttonText}>
-                            {loading
-                                ? "Signing in..."
-                                : "Sign In"}
+            <ScrollView
+                contentContainerStyle={styles.scrollContent}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
+            >
+                <View style={styles.content}>
+                    <View style={styles.logoContainer}>
+                        <Text style={styles.logo}>
+                            BLUEPEAK
                         </Text>
-                    </Pressable>
-                </View>
 
-                <Text style={styles.footer}>
-                    BluePeak POS
-                </Text>
-            </View>
+                        <Text style={styles.subtitle}>
+                            POINT OF SALE
+                        </Text>
+                    </View>
+
+                    <View style={styles.card}>
+                        <Text style={styles.title}>
+                            Welcome back
+                        </Text>
+
+                        <Text style={styles.label}>
+                            Organisation Code
+                        </Text>
+
+                        <TextInput
+                            value={organisationCode}
+                            onChangeText={setOrganisationCode}
+                            placeholder="Enter organisation code"
+                            placeholderTextColor="#8B8B8B"
+                            autoCapitalize="characters"
+                            autoCorrect={false}
+                            autoComplete="off"
+                            style={styles.input}
+                            editable={!loading}
+                            returnKeyType="next"
+                        />
+
+                        <Text style={styles.label}>
+                            Username
+                        </Text>
+
+                        <TextInput
+                            value={username}
+                            onChangeText={setUsername}
+                            placeholder="Enter your username"
+                            placeholderTextColor="#8B8B8B"
+                            autoCapitalize="none"
+                            autoCorrect={false}
+                            autoComplete="username"
+                            style={styles.input}
+                            editable={!loading}
+                            returnKeyType="next"
+                        />
+
+                        <Text style={styles.label}>
+                            Password
+                        </Text>
+
+                        <TextInput
+                            value={password}
+                            onChangeText={setPassword}
+                            placeholder="Enter your password"
+                            placeholderTextColor="#8B8B8B"
+                            secureTextEntry
+                            autoCapitalize="none"
+                            autoComplete="current-password"
+                            style={styles.input}
+                            editable={!loading}
+                            returnKeyType="done"
+                            onSubmitEditing={handleLogin}
+                        />
+
+                        <Pressable
+                            style={[
+                                styles.button,
+                                loading && styles.buttonDisabled,
+                            ]}
+                            onPress={handleLogin}
+                            disabled={loading}
+                        >
+                            {loading ? (
+                                <ActivityIndicator color="#FFFFFF" />
+                            ) : (
+                                <Text style={styles.buttonText}>
+                                    Sign In
+                                </Text>
+                            )}
+                        </Pressable>
+
+                        <Pressable
+                            style={styles.registerButton}
+                            onPress={() =>
+                                router.push(
+                                    "/register-organisation"
+                                )
+                            }
+                            disabled={loading}
+                            accessibilityRole="button"
+                        >
+                            <Text
+                                style={
+                                    styles.registerButtonText
+                                }
+                            >
+                                Register Your Organisation
+                            </Text>
+                        </Pressable>
+
+                        <Text style={styles.registerHint}>
+                            New to BluePeak? Set up your
+                            business account.
+                        </Text>
+                    </View>
+
+                    <Text style={styles.footer}>
+                        BluePeak POS
+                    </Text>
+                </View>
+            </ScrollView>
         </KeyboardAvoidingView>
     );
 }
@@ -155,10 +254,13 @@ const styles = StyleSheet.create({
         flex: 1,
         backgroundColor: "#F4F6F8",
     },
-    content: {
-        flex: 1,
+    scrollContent: {
+        flexGrow: 1,
         justifyContent: "center",
+    },
+    content: {
         paddingHorizontal: 24,
+        paddingVertical: 32,
     },
     logoContainer: {
         alignItems: "center",
@@ -220,6 +322,28 @@ const styles = StyleSheet.create({
     },
     buttonDisabled: {
         opacity: 0.6,
+    },
+    registerButton: {
+        minHeight: 48,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: "#D1D5DB",
+        backgroundColor: "#FFFFFF",
+        alignItems: "center",
+        justifyContent: "center",
+        marginTop: 12,
+    },
+    registerButtonText: {
+        color: "#111827",
+        fontSize: 14,
+        fontWeight: "800",
+    },
+    registerHint: {
+        color: "#6B7280",
+        fontSize: 12,
+        textAlign: "center",
+        marginTop: 10,
+        lineHeight: 18,
     },
     buttonText: {
         color: "#FFFFFF",

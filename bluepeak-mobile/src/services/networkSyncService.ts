@@ -1,87 +1,109 @@
 import * as Network from "expo-network";
+
 import { syncPendingSales } from "./syncService";
+import { getToken, getUser } from "../storage/authStorage";
+import { getActiveOrganisationId } from "./localDatabase";
 
 let isSyncing = false;
+let activeMonitorId = 0;
+let activeInterval: ReturnType<typeof setInterval> | null = null;
 
-/**
- * Prevent multiple sync operations from
- * running at the same time.
- */
-async function runSync() {
-    if (isSyncing) {
-        console.log(
-            "⏳ Sync already running..."
-        );
+async function runSync(monitorId: number): Promise<void> {
+    if (isSyncing || monitorId !== activeMonitorId) {
         return;
     }
 
-    try {
-        isSyncing = true;
+    isSyncing = true;
 
-        const networkState =
-            await Network.getNetworkStateAsync();
+    try {
+        const token = await getToken();
+        const user = await getUser();
+        const organisationId = getActiveOrganisationId();
+
+        // Require a valid stored online session.
+        if (
+            !token ||
+            !user ||
+            !organisationId ||
+            user.organisationId !== organisationId
+        ) {
+            console.log(
+                "Sync skipped: no matching authenticated organisation."
+            );
+            return;
+        }
+
+        const networkState = await Network.getNetworkStateAsync();
 
         if (
             !networkState.isConnected ||
-            !networkState.isInternetReachable
+            networkState.isInternetReachable === false
+        ) {
+            console.log("No internet connection. Sync skipped.");
+            return;
+        }
+
+        // Recheck the monitor and session before starting.
+        if (monitorId !== activeMonitorId) {
+            return;
+        }
+
+        const latestToken = await getToken();
+        const latestUser = await getUser();
+
+        if (
+            latestToken !== token ||
+            !latestUser ||
+            latestUser.organisationId !== organisationId ||
+            getActiveOrganisationId() !== organisationId
         ) {
             console.log(
-                "📴 No internet connection. Sync skipped."
+                "Sync cancelled: the active session changed."
             );
             return;
         }
 
         console.log(
-            "🌐 Internet available. Checking pending sales..."
+            `Checking pending sales for organisation ${organisationId}...`
         );
 
         await syncPendingSales();
     } catch (error) {
-        console.error(
-            "❌ Automatic sync failed:",
-            error
-        );
+        console.error("Automatic sync failed:", error);
     } finally {
         isSyncing = false;
     }
 }
 
-/**
- * Start network monitoring.
- *
- * expo-network does not provide a persistent
- * connectivity listener, so we periodically
- * check the network state.
- */
-export function startNetworkSync() {
-    console.log(
-        "🌐 Starting BluePeak network sync monitor..."
-    );
+export function startNetworkSync(): () => void {
+    // Avoid starting duplicate monitors.
+    if (activeInterval !== null) {
+        clearInterval(activeInterval);
+        activeInterval = null;
+    }
 
-    /*
-     * Check immediately when monitoring starts.
-     */
-    runSync();
+    const monitorId = ++activeMonitorId;
 
-    /*
-     * Check every 10 seconds.
-     *
-     * This allows an already-open POS to detect
-     * when the server/network becomes available.
-     */
-    const interval = setInterval(() => {
-        runSync();
+    console.log("Starting BluePeak network sync monitor.");
+
+    void runSync(monitorId);
+
+    activeInterval = setInterval(() => {
+        void runSync(monitorId);
     }, 10_000);
 
-    /*
-     * Return a cleanup function so the interval
-     * can be stopped when the app unmounts.
-     */
     return () => {
-        console.log(
-            "🛑 Stopping BluePeak network sync monitor."
-        );
+        if (monitorId !== activeMonitorId) {
+            return;
+        }
 
-        clearInterval(interval);
+        console.log("Stopping BluePeak network sync monitor.");
+
+        ++activeMonitorId;
+
+        if (activeInterval !== null) {
+            clearInterval(activeInterval);
+            activeInterval = null;
+        }
     };
 }

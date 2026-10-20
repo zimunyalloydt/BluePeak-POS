@@ -1,8 +1,22 @@
-import api from "./api";
-import { getDatabase , rejectLocalSale,} from "./localDatabase";
+import axios from "axios";
+
+import {
+    getDatabase,
+    getActiveOrganisationId,
+    markSaleSynced as markLocalSaleSynced,
+    markSaleSyncFailed,
+} from "./localDatabase";
+
+import {
+    getToken,
+    getUser,
+} from "../storage/authStorage";
+
+import { API_BASE_URL } from "../config/api";
 
 interface LocalSale {
     localSaleId: string;
+    receiptToken: string | null;
     userId: number;
     paymentMethod: string;
     amountPaid: number;
@@ -15,6 +29,12 @@ interface LocalSaleItem {
     quantity: number;
 }
 
+interface SyncSession {
+    organisationId: number;
+    userId: number;
+    token: string;
+}
+
 interface SyncResult {
     localSaleId: string;
     success: boolean;
@@ -22,16 +42,79 @@ interface SyncResult {
     error?: string;
 }
 
-/**
- * Get all sales that are waiting to be synchronized.
- */
-async function getPendingSales(): Promise<LocalSale[]> {
-    const db = await getDatabase();
+function isSessionStillActive(
+    session: SyncSession
+): boolean {
+    return (
+        getActiveOrganisationId() === session.organisationId
+    );
+}
 
-    return await db.getAllAsync<LocalSale>(
+async function assertSessionActive(
+    session: SyncSession
+): Promise<void> {
+    if (!isSessionStillActive(session)) {
+        throw new Error(
+            "The active organisation changed. Synchronisation stopped."
+        );
+    }
+
+    const [user, token] = await Promise.all([
+        getUser(),
+        getToken(),
+    ]);
+
+    if (
+        getActiveOrganisationId() !== session.organisationId ||
+        !user ||
+        user.organisationId !== session.organisationId ||
+        user.userId !== session.userId ||
+        token !== session.token
+    ) {
+        throw new Error(
+            "The authenticated session changed. Synchronisation stopped."
+        );
+    }
+}
+
+async function captureSyncSession(): Promise<SyncSession> {
+    const organisationId = getActiveOrganisationId();
+
+    const [user, token] = await Promise.all([
+        getUser(),
+        getToken(),
+    ]);
+
+    if (
+        !organisationId ||
+        !user ||
+        user.organisationId !== organisationId ||
+        !token
+    ) {
+        throw new Error(
+            "An authenticated online session is required to synchronize sales."
+        );
+    }
+
+    return {
+        organisationId,
+        userId: user.userId,
+        token,
+    };
+}
+
+async function getPendingSales(
+    session: SyncSession
+): Promise<LocalSale[]> {
+    await assertSessionActive(session);
+
+    const db = await getDatabase(session.organisationId);
+
+    return db.getAllAsync<LocalSale>(
         `
         SELECT
             s.localSaleId,
+            s.receiptToken,
             s.userId,
             s.paymentMethod,
             s.amountPaid,
@@ -41,26 +124,24 @@ async function getPendingSales(): Promise<LocalSale[]> {
         INNER JOIN sync_queue q
             ON q.localSaleId = s.localSaleId
         WHERE
-            s.syncStatus = 'pending'
-            AND q.status IN ('pending', 'failed')
+            s.syncStatus IN ('pending', 'failed', 'syncing')
+            AND q.status IN ('pending', 'failed', 'syncing')
         ORDER BY s.id ASC
         `
     );
 }
 
-/**
- * Get the products/items belonging to one local sale.
- */
 async function getSaleItems(
+    session: SyncSession,
     localSaleId: string
 ): Promise<LocalSaleItem[]> {
-    const db = await getDatabase();
+    await assertSessionActive(session);
 
-    return await db.getAllAsync<LocalSaleItem>(
+    const db = await getDatabase(session.organisationId);
+
+    return db.getAllAsync<LocalSaleItem>(
         `
-        SELECT
-            productId,
-            quantity
+        SELECT productId, quantity
         FROM sale_items
         WHERE localSaleId = ?
         ORDER BY id ASC
@@ -69,288 +150,262 @@ async function getSaleItems(
     );
 }
 
-/**
- * Mark a local sale as successfully synchronized.
- */
-async function markSaleSynced(
+async function markSyncFailedSafely(
+    session: SyncSession,
     localSaleId: string,
-    serverSaleId: number
+    message: string
 ): Promise<void> {
-    const db = await getDatabase();
-
-    await db.withTransactionAsync(async () => {
-        await db.runAsync(
-            `
-            UPDATE sales
-            SET
-                serverSaleId = ?,
-                syncStatus = 'synced'
-            WHERE localSaleId = ?
-            `,
-            serverSaleId,
-            localSaleId
+    try {
+        // Always target the database captured for this batch.
+        await markSaleSyncFailed(
+            localSaleId,
+            message,
+            session.organisationId
         );
-
-        await db.runAsync(
-            `
-            DELETE FROM sync_queue
-            WHERE localSaleId = ?
-            `,
-            localSaleId
+    } catch (error) {
+        console.error(
+            `Could not update sync status for ${localSaleId}:`,
+            error
         );
-    });
-
-    console.log(
-        `✅ Synced ${localSaleId} → Server Sale #${serverSaleId}`
-    );
+    }
 }
 
-/**
- * Record a failed synchronization attempt.
- *
- * The sale remains safely stored locally.
- */
-async function markSyncFailed(
-    localSaleId: string,
-    errorMessage: string
-): Promise<void> {
-    const db = await getDatabase();
-
-    await db.runAsync(
-        `
-        UPDATE sync_queue
-        SET
-            status = 'failed',
-            attempts = attempts + 1,
-            lastAttemptAt = ?,
-            errorMessage = ?
-        WHERE localSaleId = ?
-        `,
-        new Date().toISOString(),
-        errorMessage,
-        localSaleId
-    );
-
-    console.warn(
-        `⚠️ Sync failed for ${localSaleId}: ${errorMessage}`
-    );
-}
-
-/**
- * Synchronize one local sale with the server.
- */
 async function syncOneSale(
+    session: SyncSession,
     sale: LocalSale
 ): Promise<SyncResult> {
     try {
-        const items =
-            await getSaleItems(
-                sale.localSaleId
-            );
+        await assertSessionActive(session);
 
-        if (items.length === 0) {
+        /*
+         * Sales are attributed to the authenticated cashier by the
+         * backend. Do not upload a sale created by another cashier
+         * using the current cashier's token.
+         */
+        if (sale.userId !== session.userId) {
             throw new Error(
-                "Local sale has no sale items."
+                "This offline sale belongs to another cashier. Sign in as the original cashier in this organisation to synchronize it."
             );
         }
 
-        /*
-         * IMPORTANT:
-         *
-         * localSaleId is also the ClientSaleId
-         * sent to the backend.
-         *
-         * The backend has a UNIQUE index on
-         * ClientSaleId, so retrying the same
-         * sale cannot create a duplicate sale.
-         */
+        const items = await getSaleItems(
+            session,
+            sale.localSaleId
+        );
+
+        await assertSessionActive(session);
+
+        if (items.length === 0) {
+            throw new Error(
+                "Local sale has no sale items. Manual review is required."
+            );
+        }
+
         const payload = {
-            clientSaleId:
-                sale.localSaleId,
-
-            userId:
-                sale.userId,
-
-            paymentMethod:
-                sale.paymentMethod,
-
-            amountPaid:
-                sale.amountPaid,
-
-            customerName:
-                sale.customerName ??
-                undefined,
-
+            clientSaleId: sale.localSaleId,
+            userId: sale.userId,
+            receiptToken: sale.receiptToken,
+            paymentMethod: sale.paymentMethod,
+            amountPaid: sale.amountPaid,
+            customerName: sale.customerName ?? undefined,
             items: items.map((item) => ({
-                productId:
-                    item.productId,
-
-                quantity:
-                    item.quantity,
+                productId: item.productId,
+                quantity: item.quantity,
             })),
         };
 
         console.log(
-            `🔄 Syncing sale ${sale.localSaleId}...`
+            `Synchronizing sale ${sale.localSaleId} for organisation ${session.organisationId}.`
         );
 
-        const response =
-            await api.post<{
-                saleId: number;
-                message: string;
-            }>(
-                "/Sales",
-                payload
-            );
+        /*
+         * Use the captured token explicitly. Do not let the shared
+         * Axios interceptor substitute another account's token.
+         */
+        const response = await axios.post<{
+            saleId?: number;
+            SaleId?: number;
+            message?: string;
+            Message?: string;
+        }>(
+            `${API_BASE_URL}/Sales`,
+            payload,
+            {
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${session.token}`,
+                },
+            }
+        );
 
         const serverSaleId =
-            response.data.saleId;
+            response.data.saleId ?? response.data.SaleId;
 
-        await markSaleSynced(
+        if (
+            !Number.isInteger(serverSaleId) ||
+            !serverSaleId ||
+            serverSaleId <= 0
+        ) {
+            throw new Error(
+                "The server response did not contain a valid sale ID."
+            );
+        }
+
+        /*
+         * The request may have completed even if the user switched
+         * organisations while the network call was in flight.
+         *
+         * In that case, do not mutate the currently active database.
+         * The original sale remains queued and can be retried; the
+         * backend's ClientSaleId idempotency check protects retries.
+         */
+        /*
+         * Revalidate the complete session after the HTTP request.
+         * The organisation, cashier and token must all still match
+         * the session that uploaded this sale.
+         */
+        try {
+            await assertSessionActive(session);
+        } catch (sessionError) {
+            console.warn(
+                `Sale ${sale.localSaleId} reached the server, but the original session is no longer active. The local sale remains queued for safe reconciliation.`,
+                sessionError
+            );
+
+            return {
+                localSaleId: sale.localSaleId,
+                success: false,
+                error:
+                    "The session changed during upload. The sale remains queued for reconciliation.",
+            };
+        }
+
+        await markLocalSaleSynced(
             sale.localSaleId,
-            serverSaleId
+            serverSaleId,
+            session.organisationId
         );
 
         return {
-            localSaleId:
-                sale.localSaleId,
-
+            localSaleId: sale.localSaleId,
             success: true,
-
             serverSaleId,
         };
-       } catch (error: any) {
-        const status =
-            error?.response?.status;
+    } catch (error: any) {
+        const status = error?.response?.status;
 
-        const message =
-            error?.response?.data?.message ||
-            error?.response?.data ||
-            error?.message ||
-            "Unknown synchronization error.";
+        const responseMessage =
+            error?.response?.data?.message ??
+            error?.response?.data?.Message;
+
+        const message = String(
+            responseMessage ??
+            error?.message ??
+            "Unknown synchronization error."
+        );
 
         /*
-         * 4xx responses are permanent business/request
-         * failures. Do not keep retrying them.
-         *
-         * The local sale already deducted cached stock,
-         * so rejectedLocalSale() restores that stock.
+         * Only record a failure if the original session is still
+         * active. Logging out, switching organisations or signing
+         * in as another cashier must not change the old sale's status.
          */
-        if (
-            status &&
-            status >= 400 &&
-            status < 500
-        ) {
-            await rejectLocalSale(
+        try {
+            await assertSessionActive(session);
+
+            await markSyncFailedSafely(
+                session,
                 sale.localSaleId,
-                String(message)
+                message
             );
-        } else {
-            /*
-             * Network errors and server errors remain
-             * retryable. Keep the local stock deducted
-             * because the sale may still be synchronized.
-             */
-            await markSyncFailed(
-                sale.localSaleId,
-                String(message)
+        } catch (sessionError) {
+            console.warn(
+                `Skipped changing the sync status of ${sale.localSaleId} because its original session is no longer active.`,
+                sessionError
+            );
+        }
+
+        if (status === 401 || status === 403) {
+            console.warn(
+                "Authentication or permission error. Synchronisation must stop."
             );
         }
 
         return {
-            localSaleId:
-                sale.localSaleId,
-
+            localSaleId: sale.localSaleId,
             success: false,
-
-            error: String(message),
+            error: message,
         };
     }
 }
 
-/**
- * Synchronize all pending offline sales.
- *
- * Returns a result for every sale that was attempted.
- */
-export async function syncPendingSales(): Promise<
-    SyncResult[]
-> {
-    const pendingSales =
-        await getPendingSales();
+export async function syncPendingSales(): Promise<SyncResult[]> {
+    const session = await captureSyncSession();
+
+    await assertSessionActive(session);
+
+    const pendingSales = await getPendingSales(session);
 
     if (pendingSales.length === 0) {
-        console.log(
-            "✅ No pending sales to synchronize."
-        );
-
+        console.log("No pending sales to synchronize.");
         return [];
     }
 
     console.log(
-        `🔄 Found ${pendingSales.length} pending sale(s) to synchronize.`
+        `Found ${pendingSales.length} sale(s) for organisation ${session.organisationId}.`
     );
 
     const results: SyncResult[] = [];
 
-    /*
-     * Process sales sequentially.
-     *
-     * This is intentional for a POS system.
-     * We don't want several offline sales
-     * modifying server stock simultaneously
-     * from one device.
-     */
     for (const sale of pendingSales) {
-        const result =
-            await syncOneSale(sale);
+        try {
+            await assertSessionActive(session);
+        } catch (error: any) {
+            console.warn(
+                "Stopping synchronisation:",
+                error?.message ?? error
+            );
+            break;
+        }
+
+        const result = await syncOneSale(session, sale);
 
         results.push(result);
 
-        /*
-         * If the server/network is unavailable,
-         * stop immediately.
-         *
-         * The remaining sales stay in SQLite
-         * and will be attempted later.
-         */
         if (!result.success) {
             console.warn(
-                "⚠️ Sale synchronization stopped after an error."
+                "Stopping the batch after a synchronisation failure."
             );
-
             break;
         }
     }
 
-    const successful =
-        results.filter(
-            (result) => result.success
-        ).length;
+    const successful = results.filter(
+        (result) => result.success
+    ).length;
 
     console.log(
-        `📊 Sync finished: ${successful}/${results.length} sale(s) synchronized.`
+        `Sync finished: ${successful}/${results.length} sale(s) synchronized.`
     );
 
     return results;
 }
 
-/**
- * Get the number of sales still waiting to sync.
- */
 export async function getPendingSaleCount(): Promise<number> {
-    const db = await getDatabase();
+    const session = await captureSyncSession();
 
-    const result =
-        await db.getFirstAsync<{
-            count: number;
-        }>(
-            `
-            SELECT COUNT(*) AS count
-            FROM sync_queue
-            WHERE status IN ('pending', 'failed')
-            `
-        );
+    await assertSessionActive(session);
+
+    const db = await getDatabase(session.organisationId);
+
+    const result = await db.getFirstAsync<{
+        count: number;
+    }>(
+        `
+        SELECT COUNT(*) AS count
+        FROM sync_queue
+        WHERE status IN ('pending', 'failed', 'syncing')
+        `
+    );
 
     return Number(result?.count ?? 0);
 }

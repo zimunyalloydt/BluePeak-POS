@@ -20,6 +20,9 @@ public class Sale
 
     public decimal Total { get; set; }
 
+public string? ReceiptToken { get; set; }
+
+
     public string? CustomerName { get; set; }
 
     public string PaymentMethod { get; set; } = "Cash";
@@ -27,6 +30,10 @@ public class Sale
     public decimal AmountPaid { get; set; }
 
     public decimal ChangeGiven { get; set; }
+
+    public int OrganisationId { get; set; }
+
+public Organisation? Organisation { get; set; }
 
     public int UserId { get; set; }
 

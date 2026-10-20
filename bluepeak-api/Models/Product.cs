@@ -49,5 +49,9 @@ public class Product
     [Required]
 public int TargetStockDays { get; set; } = 7;
 
+public int OrganisationId { get; set; }
+
+public Organisation? Organisation { get; set; }
+
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }

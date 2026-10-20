@@ -1,6 +1,9 @@
 import api from "./api";
+import * as Crypto from "expo-crypto";
+import { getUser } from "../storage/authStorage";
 import {
-    getDatabase,rejectLocalSale,
+    getDatabase,
+    rejectLocalSale,
 } from "./localDatabase";
 
 export interface SaleItem {
@@ -15,6 +18,7 @@ export interface SaleItem {
 
 export interface CreateSaleRequest {
     userId: number;
+    receiptToken?: string;
     clientSaleId?: string;
     paymentMethod: string;
     amountPaid: number;
@@ -38,6 +42,7 @@ export interface ReceiptItem {
 
 export interface Receipt {
     saleId: number;
+    receiptToken?: string;
     saleDate: string;
     cashier: string;
     paymentMethod: string;
@@ -46,6 +51,11 @@ export interface Receipt {
     total: number;
     amountPaid: number;
     changeGiven: number;
+    organisationName?: string;
+    organisationAddress?: string | null;
+    organisationPhoneNumber?: string | null;
+    organisationEmail?: string | null;
+    organisationLogoUrl?: string | null;
     customerName?: string | null;
     items: ReceiptItem[];
 }
@@ -110,6 +120,7 @@ async function saveSaleLocally(
                 `
                 INSERT INTO sales (
                     localSaleId,
+                    receiptToken,
                     userId,
                     paymentMethod,
                     amountPaid,
@@ -122,9 +133,10 @@ async function saveSaleLocally(
                     createdAt,
                     syncStatus
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 `,
                 localSaleId,
+                sale.receiptToken ?? null,
                 sale.userId,
                 sale.paymentMethod,
                 sale.amountPaid,
@@ -245,6 +257,7 @@ async function getLocalReceipt(
     const sale =
         await db.getFirstAsync<{
             localSaleId: string;
+            receiptToken: string | null;
             serverSaleId: number | null;
             userId: number;
             paymentMethod: string;
@@ -261,6 +274,7 @@ async function getLocalReceipt(
                 localSaleId,
                 serverSaleId,
                 userId,
+                receiptToken,
                 paymentMethod,
                 amountPaid,
                 customerName,
@@ -310,11 +324,13 @@ async function getLocalReceipt(
                 )
         );
 
+    const cachedUser = await getUser();
+
     return {
         saleId:
             sale.serverSaleId ??
             numericLocalId,
-
+        receiptToken: sale.receiptToken ?? undefined,
         saleDate: sale.createdAt,
         cashier: "Offline Sale",
         paymentMethod:
@@ -325,6 +341,22 @@ async function getLocalReceipt(
         amountPaid: sale.amountPaid,
         changeGiven:
             sale.changeGiven,
+
+        organisationName:
+            cachedUser?.organisationName ?? "",
+
+        organisationAddress:
+            cachedUser?.organisationAddress ?? null,
+
+        organisationPhoneNumber:
+            cachedUser?.organisationPhoneNumber ?? null,
+
+        organisationEmail:
+            cachedUser?.organisationEmail ?? null,
+
+        organisationLogoUrl:
+            cachedUser?.organisationLogoUrl ?? null,
+
         customerName:
             sale.customerName,
         items,
@@ -334,7 +366,6 @@ async function getLocalReceipt(
 export async function createSale(
     sale: CreateSaleRequest
 ): Promise<CreateSaleResponse> {
-
     /*
      * =====================================================
      * 1. GENERATE THE CLIENT SALE ID
@@ -350,9 +381,14 @@ export async function createSale(
         sale.clientSaleId ??
         generateLocalSaleId();
 
+    const receiptToken =
+        sale.receiptToken ??
+        Crypto.randomUUID();
+
     const saleWithClientId: CreateSaleRequest = {
         ...sale,
         clientSaleId: localSaleId,
+        receiptToken,
     };
 
     /*
@@ -397,38 +433,37 @@ export async function createSale(
             localSaleId,
             offline: false,
         };
-
     } catch (error: any) {
-
-        /*
-         * Do NOT silently convert normal API errors
-         * such as 400/401/403 into offline sales.
-         *
-         * Network errors and server 5xx errors can
-         * safely remain in the sync queue.
-         */
         const status =
             error?.response?.status;
 
-               if (
-            status &&
-            status >= 400 &&
-            status < 500
-        ) {
+        /*
+         * Authentication failures are not proof that a sale
+         * is invalid. Keep the local sale and stock deduction.
+         * It can be retried after the cashier authenticates online.
+         */
+        if (status === 401 || status === 403) {
+            console.warn(
+                `Sale ${localSaleId} remains queued because authentication or permissions were rejected.`
+            );
+
+            throw error;
+        }
+
+        /*
+         * Other client errors may indicate invalid sale data.
+         * The sale was already saved locally and cached stock
+         * was already deducted. Since the server permanently
+         * rejected this sale, restore the local stock and
+         * prevent the sale from being retried.
+         */
+        if (status && status >= 400 && status < 500) {
             const message =
                 error?.response?.data?.message ||
-                error?.response?.data ||
+                error?.response?.data?.Message ||
                 error?.message ||
                 "Sale was rejected by the server.";
 
-            /*
-             * The sale was already saved locally and
-             * cached stock was already deducted.
-             *
-             * Since the server permanently rejected
-             * this sale, restore the local stock and
-             * prevent the sale from being retried.
-             */
             await rejectLocalSale(
                 localSaleId,
                 String(message)
@@ -437,6 +472,10 @@ export async function createSale(
             throw error;
         }
 
+        /*
+         * Network failures and server errors leave the sale
+         * in the queue for a future synchronisation attempt.
+         */
         console.warn(
             "⚠️ Server unavailable. Sale remains in local sync queue."
         );
@@ -463,7 +502,6 @@ export async function createSale(
 export async function getReceipt(
     saleId: number
 ): Promise<Receipt> {
-
     /*
      * Negative SaleId means the receipt is
      * currently local/offline.

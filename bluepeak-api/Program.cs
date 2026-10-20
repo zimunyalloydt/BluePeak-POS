@@ -43,12 +43,19 @@ builder.Services.AddCors(options =>
 
 builder.Services.AddScoped<ITaskService, TaskService>();
 builder.Services.AddScoped<IUserService, UserService>();
+builder.Services.AddControllers();
 builder.Services.AddScoped<
     IInventoryPredictionService,
     InventoryPredictionService>();
 
 builder.Services.AddScoped<IMessageService, MessageService>();
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<IOrganisationContext, OrganisationContext>();
+// Controllers
+builder.Services.AddControllers();
 
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<IOrganisationContext, OrganisationContext>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
 
 builder.Services.AddScoped<ISaleRepository, SaleRepository>();

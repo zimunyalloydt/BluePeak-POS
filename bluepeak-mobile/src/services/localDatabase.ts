@@ -1,20 +1,106 @@
 import * as SQLite from "expo-sqlite";
 
-const DB_NAME = "bluepeak.db";
+const DEFAULT_DB_NAME = "bluepeak.db";
 
-let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
+type OrganisationDatabase = {
+    databaseName: string;
+    databasePromise: Promise<SQLite.SQLiteDatabase>;
+};
 
-export function getDatabase(): Promise<SQLite.SQLiteDatabase> {
-    if (!dbPromise) {
-        dbPromise = SQLite.openDatabaseAsync(DB_NAME);
+const organisationDatabases = new Map<number, OrganisationDatabase>();
+
+let activeOrganisationId: number | null = null;
+
+/**
+ * Select the database belonging to an organisation.
+ *
+ * Existing organisation 1 data remains in bluepeak.db.
+ * Other organisations use separate database files.
+ *
+ * Connections are retained when switching organisations so
+ * an in-progress operation cannot accidentally close another
+ * organisation's database connection.
+ */
+export async function setActiveOrganisation(
+    organisationId: number
+): Promise<void> {
+    if (
+        !Number.isInteger(organisationId) ||
+        organisationId < 1
+    ) {
+        throw new Error("Invalid organisation ID.");
     }
 
-    return dbPromise;
+    activeOrganisationId = organisationId;
+
+    console.log(
+        `Selected local database for organisation ${organisationId}.`
+    );
+}
+
+/**
+ * Return the currently selected organisation ID.
+ */
+export function getActiveOrganisationId(): number | null {
+    return activeOrganisationId;
+}
+
+/**
+ * Open or reuse the SQLite connection for the active organisation.
+ */
+export function getDatabase(
+    requestedOrganisationId?: number
+): Promise<SQLite.SQLiteDatabase> {
+    const organisationId =
+        requestedOrganisationId ?? activeOrganisationId;
+
+    if (
+        organisationId === null ||
+        organisationId === undefined ||
+        !Number.isInteger(organisationId) ||
+        organisationId < 1
+    ) {
+        throw new Error(
+            "No valid organisation database selected. Authenticate first."
+        );
+    }
+
+    let entry = organisationDatabases.get(organisationId);
+
+    if (!entry) {
+        const databaseName =
+            organisationId === 1
+                ? DEFAULT_DB_NAME
+                : `bluepeak_org_${organisationId}.db`;
+
+        entry = {
+            databaseName,
+            databasePromise: SQLite.openDatabaseAsync(databaseName),
+        };
+
+        organisationDatabases.set(organisationId, entry);
+
+        console.log(
+            `Opening ${databaseName} for organisation ${organisationId}.`
+        );
+
+        // Allow a failed connection attempt to be retried.
+        void entry.databasePromise.catch(() => {
+            if (organisationDatabases.get(organisationId) === entry) {
+                organisationDatabases.delete(organisationId);
+            }
+        });
+    }
+
+    return entry.databasePromise;
 }
 
 export async function initializeLocalDatabase(): Promise<void> {
     const db = await getDatabase();
 
+    // ---------------------------------------------------------
+    // CREATE TABLES
+    // ---------------------------------------------------------
     await db.execAsync(`
         PRAGMA journal_mode = WAL;
 
@@ -33,6 +119,7 @@ export async function initializeLocalDatabase(): Promise<void> {
         CREATE TABLE IF NOT EXISTS sales (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             localSaleId TEXT NOT NULL UNIQUE,
+            receiptToken TEXT,
             serverSaleId INTEGER,
             userId INTEGER NOT NULL,
             paymentMethod TEXT NOT NULL,
@@ -55,7 +142,7 @@ export async function initializeLocalDatabase(): Promise<void> {
             quantity REAL NOT NULL,
             unitPrice REAL NOT NULL,
             costPrice REAL NOT NULL,
-            total REAL NOT NULL,
+            total REAL NOT NULL DEFAULT 0,
             FOREIGN KEY (localSaleId)
                 REFERENCES sales(localSaleId)
                 ON DELETE CASCADE
@@ -88,11 +175,10 @@ export async function initializeLocalDatabase(): Promise<void> {
     // DATABASE MIGRATIONS
     // ---------------------------------------------------------
 
-    const salesColumns = await db.getAllAsync<{
-        name: string;
-    }>(`
-        PRAGMA table_info(sales);
-    `);
+    // Read the sales columns after creating the table.
+    const salesColumns = await db.getAllAsync<{ name: string }>(
+        "PRAGMA table_info(sales);"
+    );
 
     const hasChangeGiven = salesColumns.some(
         (column) => column.name === "changeGiven"
@@ -104,16 +190,30 @@ export async function initializeLocalDatabase(): Promise<void> {
             ADD COLUMN changeGiven REAL NOT NULL DEFAULT 0;
         `);
 
-        console.log(
-            "🛠️ Database migration: added sales.changeGiven"
-        );
+        console.log("🛠️ Database migration: added sales.changeGiven");
     }
 
-    const saleItemsColumns = await db.getAllAsync<{
-        name: string;
-    }>(`
-        PRAGMA table_info(sale_items);
-    `);
+    // Read the columns again because the schema might have changed.
+    const updatedSalesColumns = await db.getAllAsync<{ name: string }>(
+        "PRAGMA table_info(sales);"
+    );
+
+    const hasReceiptToken = updatedSalesColumns.some(
+        (column) => column.name === "receiptToken"
+    );
+
+    if (!hasReceiptToken) {
+        await db.execAsync(`
+            ALTER TABLE sales
+            ADD COLUMN receiptToken TEXT;
+        `);
+
+        console.log("🛠️ Database migration: added sales.receiptToken");
+    }
+
+    const saleItemsColumns = await db.getAllAsync<{ name: string }>(
+        "PRAGMA table_info(sale_items);"
+    );
 
     const hasSaleItemTotal = saleItemsColumns.some(
         (column) => column.name === "total"
@@ -125,9 +225,7 @@ export async function initializeLocalDatabase(): Promise<void> {
             ADD COLUMN total REAL NOT NULL DEFAULT 0;
         `);
 
-        console.log(
-            "🛠️ Database migration: added sale_items.total"
-        );
+        console.log("🛠️ Database migration: added sale_items.total");
     }
 
     console.log("✅ BluePeak local database initialized");
@@ -461,6 +559,7 @@ export type SaveLocalSaleInput = {
     paymentMethod: string;
     amountPaid: number;
     customerName?: string | null;
+    receiptToken?: string | null;
     subtotal: number;
     vat: number;
     total: number;
@@ -500,9 +599,10 @@ export async function markSaleSyncing(
 
 export async function markSaleSynced(
     localSaleId: string,
-    serverSaleId: number
+    serverSaleId: number,
+    organisationId?: number
 ): Promise<void> {
-    const db = await getDatabase();
+    const db = await getDatabase(organisationId);
 
     await db.withTransactionAsync(async () => {
         await db.runAsync(
@@ -534,9 +634,10 @@ export async function markSaleSynced(
 
 export async function markSaleSyncFailed(
     localSaleId: string,
-    errorMessage: string
+    errorMessage: string,
+    organisationId?: number
 ): Promise<void> {
-    const db = await getDatabase();
+    const db = await getDatabase(organisationId);
 
     await db.withTransactionAsync(async () => {
         await db.runAsync(
@@ -607,36 +708,41 @@ export async function saveLocalSale(
         // ---------------------------------------------------------
         // 2. Save the sale
         // ---------------------------------------------------------
-        await db.runAsync(
-            `
-            INSERT INTO sales (
-                localSaleId,
-                userId,
-                paymentMethod,
-                amountPaid,
-                customerName,
-                subtotal,
-                vat,
-                total,
-                changeGiven,
-                profit,
-                createdAt,
-                syncStatus
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
-            `,
-            sale.localSaleId,
-            sale.userId,
-            sale.paymentMethod,
-            sale.amountPaid,
-            sale.customerName ?? null,
-            sale.subtotal,
-            sale.vat,
-            sale.total,
-            sale.changeGiven,
-            sale.profit,
-            sale.createdAt
-        );
+        
+await db.runAsync(
+    `
+    INSERT INTO sales (
+        localSaleId,
+        receiptToken,
+        userId,
+        paymentMethod,
+        amountPaid,
+        customerName,
+        subtotal,
+        vat,
+        total,
+        changeGiven,
+        profit,
+        createdAt,
+        syncStatus
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `,
+    sale.localSaleId,
+    sale.receiptToken ?? null,
+    sale.userId,
+    sale.paymentMethod,
+    sale.amountPaid,
+    sale.customerName ?? null,
+    sale.subtotal,
+    sale.vat,
+    sale.total,
+    sale.changeGiven,
+    sale.profit,
+    sale.createdAt,
+    "pending"
+);
+
 
         // ---------------------------------------------------------
         // 3. Save sale items
