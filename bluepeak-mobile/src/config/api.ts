@@ -1,4 +1,4 @@
-export const API_SERVER = "http://192.168.0.9:5160";
+export const API_SERVER = "https://bluepeak-api-fcti.onrender.com";
 
 export const API_BASE_URL = `${API_SERVER}/api`;
 
