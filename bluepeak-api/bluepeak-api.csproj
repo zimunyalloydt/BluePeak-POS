@@ -1,10 +1,11 @@
-<Project Sdk="Microsoft.NET.Sdk.Web">
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
 
   <PropertyGroup>
     <TargetFramework>net9.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>bluepeak_api</RootNamespace>
+    <UserSecretsId>74fa3623-8184-403e-ac94-549ebf74c438</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>
