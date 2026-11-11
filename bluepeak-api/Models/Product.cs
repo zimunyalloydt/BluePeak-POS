@@ -23,13 +23,21 @@ public class Product
     public decimal SellingPrice { get; set; }
 
     [Column(TypeName = "decimal(18,2)")]
-    public decimal CostPrice { get; set; }
+    public decimal? CostPrice { get; set; }
 
-    // Current physical stock
+    // SingleUnit or Pack
+    [Required]
+    [MaxLength(20)]
+    public string StockType { get; set; } = "SingleUnit";
+
+    // Number of individual units inside one pack
+    [Required]
+    public int UnitsPerPack { get; set; } = 1;
+
+    // Always stored as individual units
     [Required]
     public int QuantityInStock { get; set; } = 0;
 
-    // Smart inventory settings
     [Required]
     public int ReorderLevel { get; set; } = 10;
 
@@ -40,18 +48,21 @@ public class Product
     public int SupplierLeadTimeDays { get; set; } = 3;
 
     [NotMapped]
-    public decimal Profit => SellingPrice - CostPrice;
+    public decimal? Profit =>
+        CostPrice.HasValue
+            ? SellingPrice - CostPrice.Value
+            : null;
 
     public string? ImageUrl { get; set; }
 
     public bool IsActive { get; set; } = true;
 
     [Required]
-public int TargetStockDays { get; set; } = 7;
+    public int TargetStockDays { get; set; } = 7;
 
-public int OrganisationId { get; set; }
+    public int OrganisationId { get; set; }
 
-public Organisation? Organisation { get; set; }
+    public Organisation? Organisation { get; set; }
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }

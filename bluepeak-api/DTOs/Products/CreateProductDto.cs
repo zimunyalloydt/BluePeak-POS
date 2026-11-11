@@ -1,6 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 
 namespace bluepeak_api.DTOs.Products;
+
 public class CreateProductDto
 {
     [Required]
@@ -13,15 +14,22 @@ public class CreateProductDto
 
     public decimal SellingPrice { get; set; }
 
-    public decimal CostPrice { get; set; }
+    // Optional
+    public decimal? CostPrice { get; set; }
 
-  
+    // SingleUnit or Pack
+    public string StockType { get; set; } = "SingleUnit";
 
+    // Number of units inside one pack
+    public int UnitsPerPack { get; set; } = 1;
+
+    // Used when StockType is SingleUnit
     public int QuantityInStock { get; set; } = 0;
 
-    //public string? ImageUrl { get; set; }
+    // Used when StockType is Pack
+    public int? PackQuantity { get; set; }
 
     public bool IsActive { get; set; } = true;
 
-    public IFormFile? Image {get; set; }
+    public IFormFile? Image { get; set; }
 }

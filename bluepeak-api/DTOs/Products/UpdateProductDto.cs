@@ -11,13 +11,18 @@ public class UpdateProductDto
 
     public decimal SellingPrice { get; set; }
 
-    public decimal CostPrice { get; set; }
+    // Optional
+    public decimal? CostPrice { get; set; }
+
+    // Nullable to preserve existing settings
+    // when older mobile clients update products.
+    public string? StockType { get; set; }
+
+    public int? UnitsPerPack { get; set; }
 
     public int QuantityInStock { get; set; }
 
     public bool IsActive { get; set; }
-
-  
 
     public string? ImageUrl { get; set; }
 

@@ -95,10 +95,12 @@ public class AdminRepository : IAdminRepository
 
                 Total = s.Total,
 
-                Profit = s.Items.Sum(i =>
-                    (i.UnitPrice -
-                        (i.Product == null ? 0 : i.Product.CostPrice))
-                    * i.Quantity)
+               Profit = s.Items.Any(i =>
+    i.Product == null || !i.Product.CostPrice.HasValue)
+        ? (decimal?)null
+        : s.Items.Sum(i =>
+            (i.UnitPrice - i.Product!.CostPrice!.Value)
+            * i.Quantity)
             })
             .ToListAsync();
     }

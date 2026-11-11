@@ -12,17 +12,21 @@ public class ProductDto
 
     public decimal SellingPrice { get; set; }
 
-    public decimal CostPrice { get; set; }
+    public decimal? CostPrice { get; set; }
 
-    public decimal Profit { get; set; }
+    public decimal? Profit { get; set; }
+
+    public string StockType { get; set; } = "SingleUnit";
+
+    public int UnitsPerPack { get; set; }
 
     public int QuantityInStock { get; set; }
 
-   
+    public int? PacksInStock { get; set; }
+
+    public int? LooseUnitsInStock { get; set; }
 
     public bool IsActive { get; set; }
-
-  
 
     public string? ImageUrl { get; set; }
 }

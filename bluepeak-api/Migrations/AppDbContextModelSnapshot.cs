@@ -266,7 +266,7 @@ namespace bluepeak_api.Migrations
                     b.Property<int?>("CategoryId")
                         .HasColumnType("int");
 
-                    b.Property<decimal>("CostPrice")
+                    b.Property<decimal?>("CostPrice")
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<DateTime>("CreatedAt")
@@ -303,10 +303,18 @@ namespace bluepeak_api.Migrations
                     b.Property<decimal>("SellingPrice")
                         .HasColumnType("decimal(18,2)");
 
+                    b.Property<string>("StockType")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("varchar(20)");
+
                     b.Property<int>("SupplierLeadTimeDays")
                         .HasColumnType("int");
 
                     b.Property<int>("TargetStockDays")
+                        .HasColumnType("int");
+
+                    b.Property<int>("UnitsPerPack")
                         .HasColumnType("int");
 
                     b.HasKey("ProductId");

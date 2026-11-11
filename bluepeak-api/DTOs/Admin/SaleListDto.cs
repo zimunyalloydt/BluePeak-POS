@@ -14,5 +14,5 @@ public class SaleListDto
 
     public decimal Total { get; set; }
 
-    public decimal Profit { get; set; }
+    public decimal? Profit { get; set; }
 }
