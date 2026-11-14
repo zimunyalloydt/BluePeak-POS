@@ -16,7 +16,6 @@ public DbSet<Organisation> Organisations =>
 
 public DbSet<UserPermission> UserPermissions => Set<UserPermission>();
     public DbSet<User> Users => Set<User>();
-    public DbSet<Category> Categories => Set<Category>();
     public DbSet<Product> Products => Set<Product>();
 
     public DbSet<Message> Messages => Set<Message>();
@@ -93,7 +92,6 @@ new Permission { PermissionId = 2, Name = "Refund Sales", Description = "Can ref
 
 new Permission { PermissionId = 3, Name = "Manage Products", Description = "Can add/edit/delete products" },
 
-new Permission { PermissionId = 4, Name = "Manage Categories", Description = "Can manage categories" },
 
 new Permission { PermissionId = 5, Name = "Manage Users", Description = "Can create/edit users" },
 

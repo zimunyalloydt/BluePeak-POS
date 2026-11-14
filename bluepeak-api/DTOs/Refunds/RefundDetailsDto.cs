@@ -41,6 +41,12 @@ public class RefundItemDto
 
     public int Quantity { get; set; }
 
+    public string SaleUnitType { get; set; } = "SingleUnit";
+
+    public int UnitsPerPackAtSale { get; set; } = 1;
+
+    public int StockQuantity { get; set; }
+
     public decimal UnitPrice { get; set; }
 
     public decimal Total { get; set; }

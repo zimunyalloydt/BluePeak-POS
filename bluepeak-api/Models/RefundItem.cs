@@ -20,7 +20,18 @@ public class RefundItem
 
     public Product? Product { get; set; }
 
+    // Original number of packs or individual units.
     public int Quantity { get; set; }
+
+    [Required]
+    [MaxLength(20)]
+    public string SaleUnitType { get; set; } = "SingleUnit";
+
+    // Original pack size.
+    public int UnitsPerPackAtSale { get; set; } = 1;
+
+    // Actual individual units restored to inventory.
+    public int StockQuantity { get; set; }
 
     [Column(TypeName = "decimal(18,2)")]
     public decimal UnitPrice { get; set; }

@@ -24,7 +24,7 @@ namespace bluepeak_api.Migrations
                 type: "varchar(20)",
                 maxLength: 20,
                 nullable: false,
-                defaultValue: "")
+                defaultValue: "SingleUnit")
                 .Annotation("MySql:CharSet", "utf8mb4");
 
             migrationBuilder.AddColumn<int>(
@@ -32,7 +32,7 @@ namespace bluepeak_api.Migrations
                 table: "Products",
                 type: "int",
                 nullable: false,
-                defaultValue: 0);
+                defaultValue: 1);
         }
 
         /// <inheritdoc />

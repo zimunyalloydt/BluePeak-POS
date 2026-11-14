@@ -199,23 +199,45 @@ public class RefundService : IRefundService
             await _context.Refunds.AddAsync(refund);
 
             foreach (var saleItem in sale.Items)
-            {
-                var product = saleItem.Product!;
+{
+    var product = saleItem.Product!;
 
-                product.QuantityInStock += saleItem.Quantity;
+    // Restore the exact individual-unit quantity
+    // deducted during the original sale.
+    int stockToRestore = saleItem.StockQuantity;
 
-                var refundItem = new RefundItem
-                {
-                    Refund = refund,
-                    SaleItemId = saleItem.SaleItemId,
-                    ProductId = saleItem.ProductId,
-                    Quantity = saleItem.Quantity,
-                    UnitPrice = saleItem.UnitPrice,
-                    Total = saleItem.Total
-                };
+    if (stockToRestore <= 0)
+    {
+        throw new InvalidOperationException(
+            $"Invalid stock quantity for sale item {saleItem.SaleItemId}.");
+    }
 
-                await _context.RefundItems.AddAsync(refundItem);
-            }
+    product.QuantityInStock = checked(
+        product.QuantityInStock + stockToRestore);
+
+    var refundItem = new RefundItem
+    {
+        Refund = refund,
+
+        SaleItemId = saleItem.SaleItemId,
+
+        ProductId = saleItem.ProductId,
+
+        Quantity = saleItem.Quantity,
+
+        SaleUnitType = saleItem.SaleUnitType,
+
+        UnitsPerPackAtSale = saleItem.UnitsPerPackAtSale,
+
+        StockQuantity = stockToRestore,
+
+        UnitPrice = saleItem.UnitPrice,
+
+        Total = saleItem.Total
+    };
+
+    await _context.RefundItems.AddAsync(refundItem);
+}
 
             request.Status = "Completed";
             request.ApprovedByUserId = adminUserId;
@@ -232,64 +254,76 @@ public class RefundService : IRefundService
         }
     }
 
-    public async Task<RefundDetailsDto?> GetDetailsAsync(
-        int refundRequestId)
+public async Task<RefundDetailsDto?> GetDetailsAsync(int refundRequestId)
+{
+    var request = await _repository.GetDetailsAsync(refundRequestId);
+
+    if (request == null)
+        return null;
+
+    var refund = await _context.Refunds
+        .Where(r =>
+            r.RefundRequestId == refundRequestId &&
+            r.Sale != null &&
+            r.Sale.OrganisationId == OrganisationId)
+        .Include(r => r.Items)
+            .ThenInclude(i => i.Product)
+        .FirstOrDefaultAsync();
+
+    var cashier =
+        $"{request.RequestedByUser?.FirstName} {request.RequestedByUser?.LastName}"
+            .Trim();
+
+    var processedBy =
+        $"{request.ApprovedByUser?.FirstName} {request.ApprovedByUser?.LastName}"
+            .Trim();
+
+    return new RefundDetailsDto
     {
-        var request =
-            await _repository.GetDetailsAsync(refundRequestId);
+        RefundRequestId = request.RefundRequestId,
+        RefundId = refund?.RefundId ?? 0,
+        SaleId = request.SaleId,
+        Cashier = cashier,
+        Reason = request.Reason,
+        Notes = request.Notes,
+        Status = request.Status,
+        Amount = refund?.Amount ?? request.Sale?.Total ?? 0,
+        PaymentMethod = request.Sale?.PaymentMethod ?? string.Empty,
+        RequestedAt = request.RequestedAt,
+        ApprovedAt = request.ApprovedAt,
+        CompletedAt = request.CompletedAt,
+        ProcessedBy =
+            string.IsNullOrWhiteSpace(processedBy) ? null : processedBy,
 
-        if (request == null)
-            return null;
-
-        var refund = await _context.Refunds
-            .Where(r =>
-                r.RefundRequestId == refundRequestId &&
-                r.Sale != null &&
-                r.Sale.OrganisationId == OrganisationId)
-            .Include(r => r.Items)
-            .FirstOrDefaultAsync();
-
-        var cashier =
-            $"{request.RequestedByUser?.FirstName} {request.RequestedByUser?.LastName}"
-                .Trim();
-
-        var processedBy =
-            $"{request.ApprovedByUser?.FirstName} {request.ApprovedByUser?.LastName}"
-                .Trim();
-
-        return new RefundDetailsDto
-        {
-            RefundRequestId = request.RefundRequestId,
-            RefundId = refund?.RefundId ?? 0,
-            SaleId = request.SaleId,
-            Cashier = cashier,
-            Reason = request.Reason,
-            Notes = request.Notes,
-            Status = request.Status,
-            Amount = refund?.Amount ?? request.Sale?.Total ?? 0,
-            PaymentMethod = request.Sale?.PaymentMethod ?? string.Empty,
-            RequestedAt = request.RequestedAt,
-            ApprovedAt = request.ApprovedAt,
-            CompletedAt = request.CompletedAt,
-            ProcessedBy =
-                string.IsNullOrWhiteSpace(processedBy)
-                    ? null
-                    : processedBy,
-            Items = request.Sale?.Items
-                .Select(i => new RefundItemDto
-                {
-                    SaleItemId = i.SaleItemId,
-                    ProductId = i.ProductId,
-                    ProductName =
-                        i.Product?.ProductName ?? "Unknown Product",
-                    Quantity = i.Quantity,
-                    UnitPrice = i.UnitPrice,
-                    Total = i.Total
-                })
+        Items = (refund != null
+                    ? refund.Items.Select(i => new RefundItemDto
+                    {
+                        SaleItemId = i.SaleItemId,
+                        ProductId = i.ProductId,
+                        ProductName = i.Product?.ProductName ?? "Unknown Product",
+                        Quantity = i.Quantity,
+                        SaleUnitType = i.SaleUnitType,
+                        UnitsPerPackAtSale = i.UnitsPerPackAtSale,
+                        StockQuantity = i.StockQuantity,
+                        UnitPrice = i.UnitPrice,
+                        Total = i.Total
+                    })
+                    : request.Sale?.Items.Select(i => new RefundItemDto
+                    {
+                        SaleItemId = i.SaleItemId,
+                        ProductId = i.ProductId,
+                        ProductName = i.Product?.ProductName ?? "Unknown Product",
+                        Quantity = i.Quantity,
+                        SaleUnitType = i.SaleUnitType,
+                        UnitsPerPackAtSale = i.UnitsPerPackAtSale,
+                        StockQuantity = i.StockQuantity,
+                        UnitPrice = i.UnitPrice,
+                        Total = i.Total
+                    })
+                    ?? Enumerable.Empty<RefundItemDto>())
                 .ToList()
-                ?? new List<RefundItemDto>()
-        };
-    }
+    };
+}
 
     public async Task<List<RefundHistoryDto>> GetHistoryAsync()
     {

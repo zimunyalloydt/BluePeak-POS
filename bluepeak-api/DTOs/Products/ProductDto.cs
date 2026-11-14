@@ -12,6 +12,7 @@ public class ProductDto
 
     public decimal SellingPrice { get; set; }
 
+public decimal? SellingPricePerPack { get; set; }
     public decimal? CostPrice { get; set; }
 
     public decimal? Profit { get; set; }

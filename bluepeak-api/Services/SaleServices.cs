@@ -108,57 +108,131 @@ public class SaleService : ISaleService
             SaleDate = DateTime.UtcNow
         };
 
-        foreach (var item in dto.Items)
+       foreach (var item in dto.Items)
+{
+    if (item.Quantity <= 0)
+    {
+        throw new ArgumentException(
+            "Sale quantities must be greater than zero.");
+    }
+
+    // Only retrieve products owned by this organisation.
+    var product = await _context.Products
+        .FirstOrDefaultAsync(p =>
+            p.ProductId == item.ProductId &&
+            p.OrganisationId == organisationId &&
+            p.IsActive);
+
+    if (product == null)
+    {
+        throw new InvalidOperationException(
+            $"Product {item.ProductId} was not found, is inactive, " +
+            "or does not belong to your organisation.");
+    }
+
+    // Validate the requested sale unit type.
+    var saleUnitType = item.SaleUnitType?.Trim();
+
+    if (string.Equals(
+        saleUnitType,
+        "Pack",
+        StringComparison.OrdinalIgnoreCase))
+    {
+        saleUnitType = "Pack";
+    }
+    else if (string.Equals(
+        saleUnitType,
+        "SingleUnit",
+        StringComparison.OrdinalIgnoreCase))
+    {
+        saleUnitType = "SingleUnit";
+    }
+    else
+    {
+        throw new ArgumentException(
+            "SaleUnitType must be SingleUnit or Pack.");
+    }
+
+    int stockQuantity;
+    int unitsPerPackAtSale;
+    decimal unitPrice;
+
+    if (saleUnitType == "Pack")
+    {
+        if (product.StockType != "Pack")
         {
-            if (item.Quantity <= 0)
-            {
-                throw new ArgumentException(
-                    "Sale quantities must be greater than zero.");
-            }
-
-            // Only retrieve products owned by this organisation.
-            var product = await _context.Products
-                .FirstOrDefaultAsync(p =>
-                    p.ProductId == item.ProductId &&
-                    p.OrganisationId == organisationId &&
-                    p.IsActive);
-
-            if (product == null)
-            {
-                throw new InvalidOperationException(
-                    $"Product {item.ProductId} was not found, is inactive, " +
-                    "or does not belong to your organisation.");
-            }
-
-            if (product.QuantityInStock <= 0)
-            {
-                throw new InvalidOperationException(
-                    $"{product.ProductName} is out of stock.");
-            }
-
-            if (product.QuantityInStock < item.Quantity)
-            {
-                throw new InvalidOperationException(
-                    $"Only {product.QuantityInStock} unit(s) of " +
-                    $"{product.ProductName} are available.");
-            }
-
-            // Deduct stock only from the organisation's own product.
-            product.QuantityInStock -= item.Quantity;
-
-            decimal itemTotal =
-                product.SellingPrice * item.Quantity;
-
-            subtotal += itemTotal;
-
-            sale.Items.Add(new SaleItem
-            {
-                ProductId = product.ProductId,
-                Quantity = item.Quantity,
-                UnitPrice = product.SellingPrice,
-                Total = itemTotal
-            });
+            throw new InvalidOperationException(
+                $"{product.ProductName} is not configured for pack sales.");
         }
+
+        if (product.UnitsPerPack <= 0)
+        {
+            throw new InvalidOperationException(
+                $"{product.ProductName} has an invalid pack configuration.");
+        }
+
+        if (!product.SellingPricePerPack.HasValue)
+        {
+            throw new InvalidOperationException(
+                $"{product.ProductName} does not have a pack selling price.");
+        }
+
+        if (product.SellingPricePerPack.Value <= 0)
+        {
+            throw new InvalidOperationException(
+                $"{product.ProductName} has an invalid pack selling price.");
+        }
+
+        stockQuantity = checked(
+            item.Quantity * product.UnitsPerPack);
+
+        unitsPerPackAtSale = product.UnitsPerPack;
+
+        unitPrice = product.SellingPricePerPack.Value;
+    }
+    else
+    {
+        stockQuantity = item.Quantity;
+
+        unitsPerPackAtSale = 1;
+
+        unitPrice = product.SellingPrice;
+    }
+
+    // Validate available individual-unit stock.
+    if (product.QuantityInStock < stockQuantity)
+    {
+        throw new InvalidOperationException(
+            $"Insufficient stock for {product.ProductName}. " +
+            $"Required: {stockQuantity} individual unit(s). " +
+            $"Available: {product.QuantityInStock}.");
+    }
+
+    // Deduct actual individual units from inventory.
+    product.QuantityInStock -= stockQuantity;
+
+    // Calculate the sale using the appropriate selling price.
+    decimal itemTotal = unitPrice * item.Quantity;
+
+    subtotal += itemTotal;
+
+    sale.Items.Add(new SaleItem
+    {
+        ProductId = product.ProductId,
+
+        Quantity = item.Quantity,
+
+        SaleUnitType = saleUnitType,
+
+        UnitsPerPackAtSale = unitsPerPackAtSale,
+
+        StockQuantity = stockQuantity,
+
+        UnitPrice = unitPrice,
+
+        Total = itemTotal
+    });
+}
 
         sale.Subtotal = subtotal;
         sale.Vat = 0m;
@@ -250,8 +324,11 @@ OrganisationLogoUrl =
 
             Items = sale.Items.Select(i => new SaleReceiptItemDto
             {
-                ProductName = i.Product!.ProductName,
+                ProductName = i.Product?.ProductName ?? string.Empty,
                 Quantity = i.Quantity,
+                SaleUnitType = i.SaleUnitType,
+                UnitsPerPackAtSale = i.UnitsPerPackAtSale,
+                StockQuantity = i.StockQuantity,
                 UnitPrice = i.UnitPrice,
                 Total = i.Total
             }).ToList()

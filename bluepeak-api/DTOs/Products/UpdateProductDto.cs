@@ -11,6 +11,8 @@ public class UpdateProductDto
 
     public decimal SellingPrice { get; set; }
 
+// Optional separate selling price for one complete pack.
+public decimal? SellingPricePerPack { get; set; }
     // Optional
     public decimal? CostPrice { get; set; }
 

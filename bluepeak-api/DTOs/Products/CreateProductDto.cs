@@ -14,6 +14,8 @@ public class CreateProductDto
 
     public decimal SellingPrice { get; set; }
 
+// Optional selling price for one complete pack.
+public decimal? SellingPricePerPack { get; set; }
     // Optional
     public decimal? CostPrice { get; set; }
 

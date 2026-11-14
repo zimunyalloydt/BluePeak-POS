@@ -125,19 +125,66 @@ public async Task<bool> CreateAsync(CreateProductDto dto)
         }
         imagePath = "/products/" + fileName;
     }
-    var product = new Product
-    {
-        ProductCode = dto.ProductCode,
-        ProductName = dto.ProductName,
-        Barcode = dto.Barcode,
-        SellingPrice = dto.SellingPrice,
-        CostPrice = dto.CostPrice,
-        QuantityInStock = dto.QuantityInStock,
-        IsActive = dto.IsActive,
-        ImageUrl = imagePath,
-        // Never accept organisation ownership from the client.
-        OrganisationId = organisationId
-    };
+ // Validate stock configuration.
+if (dto.StockType != "SingleUnit" && dto.StockType != "Pack")
+{
+    throw new ArgumentException(
+        "StockType must be SingleUnit or Pack.");
+}
+
+if (dto.StockType == "Pack" && dto.UnitsPerPack <= 0)
+{
+    throw new ArgumentException(
+        "UnitsPerPack must be greater than zero.");
+}
+
+if (dto.SellingPrice < 0 ||
+    (dto.SellingPricePerPack.HasValue &&
+     dto.SellingPricePerPack.Value < 0) ||
+    (dto.CostPrice.HasValue && dto.CostPrice.Value < 0))
+{
+    throw new ArgumentException(
+        "Product prices cannot be negative.");
+}
+
+if (dto.StockType == "Pack" &&
+    (!dto.PackQuantity.HasValue || dto.PackQuantity.Value < 0))
+{
+    throw new ArgumentException(
+        "A valid PackQuantity is required for pack products.");
+}
+
+int initialStock = dto.StockType == "Pack"
+    ? checked(dto.PackQuantity!.Value * dto.UnitsPerPack)
+    : dto.QuantityInStock;
+
+if (initialStock < 0)
+{
+    throw new ArgumentException(
+        "Stock quantity cannot be negative.");
+}
+
+var product = new Product
+{
+    ProductCode = dto.ProductCode,
+    ProductName = dto.ProductName,
+    Barcode = dto.Barcode,
+
+    SellingPrice = dto.SellingPrice,
+    SellingPricePerPack = dto.SellingPricePerPack,
+    CostPrice = dto.CostPrice,
+
+    StockType = dto.StockType,
+    UnitsPerPack = dto.StockType == "Pack"
+        ? dto.UnitsPerPack
+        : 1,
+
+    QuantityInStock = initialStock,
+
+    IsActive = dto.IsActive,
+    ImageUrl = imagePath,
+    OrganisationId = organisationId
+};
     await _repository.AddAsync(product);
     await _repository.SaveChangesAsync();
     return true;
@@ -160,9 +207,41 @@ public async Task<bool> UpdateAsync(
     product.ProductName = dto.ProductName;
     product.Barcode = dto.Barcode;
     product.SellingPrice = dto.SellingPrice;
-    product.CostPrice = dto.CostPrice;
-    product.IsActive = dto.IsActive;
-    product.QuantityInStock = dto.QuantityInStock;
+product.CostPrice = dto.CostPrice;
+
+// Preserve existing pack pricing when older clients
+// do not supply the new property.
+if (dto.SellingPricePerPack.HasValue)
+{
+    product.SellingPricePerPack =
+        dto.SellingPricePerPack.Value;
+}
+
+if (dto.StockType != null)
+{
+    if (dto.StockType != "SingleUnit" &&
+        dto.StockType != "Pack")
+    {
+        throw new ArgumentException(
+            "StockType must be SingleUnit or Pack.");
+    }
+
+    product.StockType = dto.StockType;
+}
+
+if (dto.UnitsPerPack.HasValue)
+{
+    if (dto.UnitsPerPack.Value <= 0)
+    {
+        throw new ArgumentException(
+            "UnitsPerPack must be greater than zero.");
+    }
+
+    product.UnitsPerPack = dto.UnitsPerPack.Value;
+}
+
+product.QuantityInStock = dto.QuantityInStock;
+product.IsActive = dto.IsActive;
 
     if (dto.Image != null && dto.Image.Length > 0)
     {
@@ -286,16 +365,36 @@ public async Task<bool> DeleteAsync(int id)
 }
 private static ProductDto MapToDto(Product product)
 {
+    int unitsPerPack = Math.Max(1, product.UnitsPerPack);
+
     return new ProductDto
     {
         ProductId = product.ProductId,
         ProductCode = product.ProductCode ?? "",
         ProductName = product.ProductName,
         Barcode = product.Barcode,
+
         SellingPrice = product.SellingPrice,
+        SellingPricePerPack = product.SellingPricePerPack,
         CostPrice = product.CostPrice,
-        Profit = product.SellingPrice - product.CostPrice,
+
+        Profit = product.CostPrice.HasValue
+            ? product.SellingPrice - product.CostPrice.Value
+            : null,
+
+        StockType = product.StockType,
+        UnitsPerPack = product.UnitsPerPack,
+
         QuantityInStock = product.QuantityInStock,
+
+        PacksInStock = product.StockType == "Pack"
+            ? product.QuantityInStock / unitsPerPack
+            : 0,
+
+        LooseUnitsInStock = product.StockType == "Pack"
+            ? product.QuantityInStock % unitsPerPack
+            : product.QuantityInStock,
+
         IsActive = product.IsActive,
         ImageUrl = product.ImageUrl
     };

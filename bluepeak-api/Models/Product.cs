@@ -22,6 +22,10 @@ public class Product
     [Column(TypeName = "decimal(18,2)")]
     public decimal SellingPrice { get; set; }
 
+// Optional separate selling price for one complete pack.
+[Column(TypeName = "decimal(18,2)")]
+public decimal? SellingPricePerPack { get; set; }
+
     [Column(TypeName = "decimal(18,2)")]
     public decimal? CostPrice { get; set; }
 
