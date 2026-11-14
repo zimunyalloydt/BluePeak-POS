@@ -8,18 +8,33 @@ namespace bluepeak_api.Migrations
     {
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            // The ClientSaleId column was already added during
-            // the first partially-applied migration attempt.
+            // Create ClientSaleId for fresh database installations.
+            migrationBuilder.AddColumn<string>(
+                name: "ClientSaleId",
+                table: "Sales",
+                type: "varchar(255)",
+                nullable: true);
 
-            // Give existing sales unique IDs.
+            // Assign unique identifiers to existing sales.
             migrationBuilder.Sql(
                 """
                 UPDATE Sales
                 SET ClientSaleId = CONCAT('legacy-', SaleId)
-                WHERE ClientSaleId = '';
+                WHERE ClientSaleId IS NULL OR ClientSaleId = '';
                 """);
 
-            // Create the unique index.
+            // Enforce non-nullable ClientSaleId.
+            migrationBuilder.AlterColumn<string>(
+                name: "ClientSaleId",
+                table: "Sales",
+                type: "varchar(255)",
+                nullable: false,
+                oldClrType: typeof(string),
+                oldType: "varchar(255)",
+                oldNullable: true);
+
+            // Create globally unique index.
+            // A later migration changes this to organisation-specific uniqueness.
             migrationBuilder.CreateIndex(
                 name: "IX_Sales_ClientSaleId",
                 table: "Sales",
