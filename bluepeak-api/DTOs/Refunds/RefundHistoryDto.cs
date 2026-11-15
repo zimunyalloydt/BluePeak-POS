@@ -21,4 +21,5 @@ public class RefundHistoryDto
     public DateTime? CompletedAt { get; set; }
 
     public string? ProcessedBy { get; set; }
+    public List<RefundItemDto> Items { get; set; } = new();
 }

@@ -22,31 +22,6 @@ namespace bluepeak_api.Migrations
 
             MySqlModelBuilderExtensions.AutoIncrementColumns(modelBuilder);
 
-            modelBuilder.Entity("bluepeak_api.Models.Category", b =>
-                {
-                    b.Property<int>("CategoryId")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("CategoryId"));
-
-                    b.Property<string>("CategoryName")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("varchar(100)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime(6)");
-
-                    b.Property<string>("Description")
-                        .HasMaxLength(255)
-                        .HasColumnType("varchar(255)");
-
-                    b.HasKey("CategoryId");
-
-                    b.ToTable("Categories");
-                });
-
             modelBuilder.Entity("bluepeak_api.Models.Message", b =>
                 {
                     b.Property<int>("MessageId")
@@ -209,12 +184,6 @@ namespace bluepeak_api.Migrations
                         },
                         new
                         {
-                            PermissionId = 4,
-                            Description = "Can manage categories",
-                            Name = "Manage Categories"
-                        },
-                        new
-                        {
                             PermissionId = 5,
                             Description = "Can create/edit users",
                             Name = "Manage Users"
@@ -263,9 +232,6 @@ namespace bluepeak_api.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("varchar(100)");
 
-                    b.Property<int?>("CategoryId")
-                        .HasColumnType("int");
-
                     b.Property<decimal?>("CostPrice")
                         .HasColumnType("decimal(18,2)");
 
@@ -303,6 +269,9 @@ namespace bluepeak_api.Migrations
                     b.Property<decimal>("SellingPrice")
                         .HasColumnType("decimal(18,2)");
 
+                    b.Property<decimal?>("SellingPricePerPack")
+                        .HasColumnType("decimal(18,2)");
+
                     b.Property<string>("StockType")
                         .IsRequired()
                         .HasMaxLength(20)
@@ -318,8 +287,6 @@ namespace bluepeak_api.Migrations
                         .HasColumnType("int");
 
                     b.HasKey("ProductId");
-
-                    b.HasIndex("CategoryId");
 
                     b.HasIndex("OrganisationId", "ProductCode")
                         .IsUnique();
@@ -381,11 +348,22 @@ namespace bluepeak_api.Migrations
                     b.Property<int>("SaleItemId")
                         .HasColumnType("int");
 
+                    b.Property<string>("SaleUnitType")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("varchar(20)");
+
+                    b.Property<int>("StockQuantity")
+                        .HasColumnType("int");
+
                     b.Property<decimal>("Total")
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<decimal>("UnitPrice")
                         .HasColumnType("decimal(18,2)");
+
+                    b.Property<int>("UnitsPerPackAtSale")
+                        .HasColumnType("int");
 
                     b.HasKey("RefundItemId");
 
@@ -571,11 +549,22 @@ namespace bluepeak_api.Migrations
                     b.Property<int>("SaleId")
                         .HasColumnType("int");
 
+                    b.Property<string>("SaleUnitType")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("varchar(20)");
+
+                    b.Property<int>("StockQuantity")
+                        .HasColumnType("int");
+
                     b.Property<decimal>("Total")
-                        .HasColumnType("decimal(65,30)");
+                        .HasColumnType("decimal(18,2)");
 
                     b.Property<decimal>("UnitPrice")
-                        .HasColumnType("decimal(65,30)");
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<int>("UnitsPerPackAtSale")
+                        .HasColumnType("int");
 
                     b.HasKey("SaleItemId");
 
@@ -765,10 +754,6 @@ namespace bluepeak_api.Migrations
 
             modelBuilder.Entity("bluepeak_api.Models.Product", b =>
                 {
-                    b.HasOne("bluepeak_api.Models.Category", null)
-                        .WithMany("Products")
-                        .HasForeignKey("CategoryId");
-
                     b.HasOne("bluepeak_api.Models.Organisation", "Organisation")
                         .WithMany()
                         .HasForeignKey("OrganisationId")
@@ -962,11 +947,6 @@ namespace bluepeak_api.Migrations
                     b.Navigation("Permission");
 
                     b.Navigation("User");
-                });
-
-            modelBuilder.Entity("bluepeak_api.Models.Category", b =>
-                {
-                    b.Navigation("Products");
                 });
 
             modelBuilder.Entity("bluepeak_api.Models.Permission", b =>

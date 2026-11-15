@@ -16,6 +16,9 @@ export interface Product {
     quantityInStock?: number;
     isActive?: boolean;
     imageUrl?: string | null;
+    sellingPricePerPack: number | null;
+stockType: string;
+unitsPerPack: number;
 }
 
 export async function getProducts(): Promise<Product[]> {

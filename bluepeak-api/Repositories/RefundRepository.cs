@@ -43,6 +43,9 @@ public class RefundRepository : IRefundRepository
                 r.Status == "Pending")
             .Include(r => r.Sale)
                 .ThenInclude(s => s!.User)
+            .Include(r => r.Sale)
+                .ThenInclude(s => s!.Items)
+                    .ThenInclude(i => i.Product)
             .Include(r => r.RequestedByUser)
             .OrderByDescending(r => r.RequestedAt)
             .ToListAsync();
@@ -89,6 +92,8 @@ public class RefundRepository : IRefundRepository
             .Include(r => r.RefundRequest)
                 .ThenInclude(rr => rr!.RequestedByUser)
             .Include(r => r.ProcessedByUser)
+            .Include(r => r.Items)
+                .ThenInclude(i => i.Product)
             .Include(r => r.Sale)
             .OrderByDescending(r => r.CreatedAt)
             .ToListAsync();
@@ -102,6 +107,8 @@ public class RefundRepository : IRefundRepository
                 r.Sale != null &&
                 r.Sale.OrganisationId == OrganisationId)
             .Include(r => r.Sale)
+                .ThenInclude(s => s!.Items)
+                    .ThenInclude(i => i.Product)
             .Include(r => r.RequestedByUser)
             .FirstOrDefaultAsync();
     }

@@ -4,13 +4,12 @@ import { getUser } from "../storage/authStorage";
 import {
     getDatabase,
     rejectLocalSale,
+    saveLocalSale,
 } from "./localDatabase";
 
 export interface SaleItem {
     productId: number;
     quantity: number;
-
-    // Used for local/offline receipt generation.
     productName?: string;
     unitPrice?: number;
     costPrice?: number;
@@ -60,6 +59,10 @@ export interface Receipt {
     items: ReceiptItem[];
 }
 
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
 function generateLocalSaleId(): string {
     return `LOCAL-${Date.now()}-${Math.random()
         .toString(36)
@@ -67,9 +70,41 @@ function generateLocalSaleId(): string {
         .toUpperCase()}`;
 }
 
-function calculateLocalSale(
-    sale: CreateSaleRequest
-) {
+function generateReceiptToken(): string {
+    // expo-crypto exposes randomUUID from SDK 49+. Fall back gracefully.
+    const c = Crypto as unknown as { randomUUID?: () => string };
+    if (typeof c.randomUUID === "function") {
+        return c.randomUUID();
+    }
+    // RFC4122-ish fallback using getRandomBytes
+    const bytes = Crypto.getRandomBytes(16);
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = Array.from(bytes, (b) =>
+        b.toString(16).padStart(2, "0")
+    ).join("");
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(
+        12,
+        16
+    )}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+/**
+ * Stable numeric id for an offline sale.
+ *
+ * We keep the same algorithm used previously so existing
+ * local receipts remain addressable, BUT we add a verification
+ * step in getReceipt() to guard against collisions.
+ */
+function numericIdForLocalSale(localSaleId: string): number {
+    const hash = Array.from(localSaleId).reduce(
+        (h, ch) => ((h << 5) - h) + ch.charCodeAt(0),
+        0
+    );
+    return -Math.abs(hash);
+}
+
+function calculateLocalSale(sale: CreateSaleRequest) {
     let subtotal = 0;
     let profit = 0;
 
@@ -79,137 +114,67 @@ function calculateLocalSale(
         const quantity = Number(item.quantity);
 
         subtotal += unitPrice * quantity;
-        profit +=
-            (unitPrice - costPrice) *
-            quantity;
+        profit += (unitPrice - costPrice) * quantity;
     }
 
     // Must match backend SaleService.
     const vat = subtotal * 0;
     const total = subtotal;
-    const changeGiven =
-        sale.amountPaid - total;
+    const changeGiven = sale.amountPaid - total;
 
-    return {
-        subtotal,
-        vat,
-        total,
-        changeGiven,
-        profit,
-    };
+    return { subtotal, vat, total, changeGiven, profit };
 }
 
+// ---------------------------------------------------------------------------
+// Local persistence
+// ---------------------------------------------------------------------------
+
+/**
+ * Saves the sale locally (single source of truth) and enqueues it
+ * for sync. Delegates to localDatabase.saveLocalSale(), which is
+ * responsible for stock deduction. There must only ever be ONE
+ * implementation of this function.
+ */
 async function saveSaleLocally(
     sale: CreateSaleRequest,
     localSaleId: string
 ): Promise<void> {
-    const db = await getDatabase();
+    const calculated = calculateLocalSale(sale);
+    const createdAt = new Date().toISOString();
 
-    const calculated =
-        calculateLocalSale(sale);
+    await saveLocalSale({
+        localSaleId,
+        userId: sale.userId,
+        paymentMethod: sale.paymentMethod,
+        amountPaid: sale.amountPaid,
+        customerName: sale.customerName ?? null,
+        receiptToken: sale.receiptToken ?? null,
 
-    const clientSaleId =
-        sale.clientSaleId ?? localSaleId;
 
-    const createdAt =
-        new Date().toISOString();
+        subtotal: calculated.subtotal,
+        vat: calculated.vat,
+        total: calculated.total,
+        changeGiven: calculated.changeGiven,
+        profit: calculated.profit,
 
-    await db.withTransactionAsync(
-        async () => {
-            await db.runAsync(
-                `
-                INSERT INTO sales (
-                    localSaleId,
-                    receiptToken,
-                    userId,
-                    paymentMethod,
-                    amountPaid,
-                    customerName,
-                    subtotal,
-                    vat,
-                    total,
-                    changeGiven,
-                    profit,
-                    createdAt,
-                    syncStatus
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                `,
-                localSaleId,
-                sale.receiptToken ?? null,
-                sale.userId,
-                sale.paymentMethod,
-                sale.amountPaid,
-                sale.customerName ?? null,
-                calculated.subtotal,
-                calculated.vat,
-                calculated.total,
-                calculated.changeGiven,
-                calculated.profit,
-                createdAt,
-                "pending"
-            );
+        createdAt,
 
-            for (const item of sale.items) {
-                const unitPrice =
-                    Number(item.unitPrice ?? 0);
-
-                const costPrice =
-                    Number(item.costPrice ?? 0);
-
-                const quantity =
-                    Number(item.quantity);
-
-                await db.runAsync(
-                    `
-                    INSERT INTO sale_items (
-                        localSaleId,
-                        productId,
-                        productName,
-                        quantity,
-                        unitPrice,
-                        costPrice,
-                        total
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                    `,
-                    localSaleId,
-                    item.productId,
-                    item.productName ??
-                        `Product ${item.productId}`,
-                    quantity,
-                    unitPrice,
-                    costPrice,
-                    unitPrice * quantity
-                );
-            }
-
-            await db.runAsync(
-                `
-                INSERT INTO sync_queue (
-                    localSaleId,
-                    status,
-                    attempts,
-                    createdAt
-                )
-                VALUES (?, ?, ?, ?)
-                `,
-                localSaleId,
-                "pending",
-                0,
-                createdAt
-            );
-        }
-    );
+        items: sale.items.map((item) => ({
+            productId: item.productId,
+            productName:
+                item.productName ?? `Product ${item.productId}`,
+            quantity: item.quantity,
+            unitPrice: Number(item.unitPrice ?? 0),
+            costPrice: Number(item.costPrice ?? 0),
+            total:
+                Number(item.unitPrice ?? 0) *
+                Number(item.quantity),
+        })),
+    });
 
     console.log(
-        "💾 Sale saved locally:",
+        "💾 Sale saved locally and stock deducted:",
         localSaleId
-    );
-
-    console.log(
-        "🔑 ClientSaleId:",
-        clientSaleId
     );
 }
 
@@ -219,30 +184,26 @@ async function markSaleSynced(
 ): Promise<void> {
     const db = await getDatabase();
 
-    await db.withTransactionAsync(
-        async () => {
-            await db.runAsync(
-                `
-                UPDATE sales
-                SET
-                    serverSaleId = ?,
-                    syncStatus = ?
-                WHERE localSaleId = ?
-                `,
-                serverSaleId,
-                "synced",
-                localSaleId
-            );
+    await db.withTransactionAsync(async () => {
+        await db.runAsync(
+            `
+            UPDATE sales
+            SET serverSaleId = ?, syncStatus = ?
+            WHERE localSaleId = ?
+            `,
+            serverSaleId,
+            "synced",
+            localSaleId
+        );
 
-            await db.runAsync(
-                `
-                DELETE FROM sync_queue
-                WHERE localSaleId = ?
-                `,
-                localSaleId
-            );
-        }
-    );
+        await db.runAsync(
+            `
+            DELETE FROM sync_queue
+            WHERE localSaleId = ?
+            `,
+            localSaleId
+        );
+    });
 
     console.log(
         `✅ Local sale ${localSaleId} synced as server sale ${serverSaleId}`
@@ -254,136 +215,90 @@ async function getLocalReceipt(
 ): Promise<Receipt | null> {
     const db = await getDatabase();
 
-    const sale =
-        await db.getFirstAsync<{
-            localSaleId: string;
-            receiptToken: string | null;
-            serverSaleId: number | null;
-            userId: number;
-            paymentMethod: string;
-            amountPaid: number;
-            customerName: string | null;
-            subtotal: number;
-            vat: number;
-            total: number;
-            changeGiven: number;
-            createdAt: string;
-        }>(
-            `
-            SELECT
-                localSaleId,
-                serverSaleId,
-                userId,
-                receiptToken,
-                paymentMethod,
-                amountPaid,
-                customerName,
-                subtotal,
-                vat,
-                total,
-                changeGiven,
-                createdAt
-            FROM sales
-            WHERE localSaleId = ?
-            `,
-            localSaleId
-        );
+    const sale = await db.getFirstAsync<{
+        localSaleId: string;
+        receiptToken: string | null;
+        serverSaleId: number | null;
+        userId: number;
+        paymentMethod: string;
+        amountPaid: number;
+        customerName: string | null;
+        subtotal: number;
+        vat: number;
+        total: number;
+        changeGiven: number;
+        createdAt: string;
+    }>(
+        `
+        SELECT
+            localSaleId,
+            serverSaleId,
+            userId,
+            receiptToken,
+            paymentMethod,
+            amountPaid,
+            customerName,
+            subtotal,
+            vat,
+            total,
+            changeGiven,
+            createdAt
+        FROM sales
+        WHERE localSaleId = ?
+        `,
+        localSaleId
+    );
 
-    if (!sale) {
-        return null;
-    }
+    if (!sale) return null;
 
-    const items =
-        await db.getAllAsync<{
-            productName: string;
-            quantity: number;
-            unitPrice: number;
-            total: number;
-        }>(
-            `
-            SELECT
-                productName,
-                quantity,
-                unitPrice,
-                total
-            FROM sale_items
-            WHERE localSaleId = ?
-            ORDER BY id ASC
-            `,
-            localSaleId
-        );
-
-    const numericLocalId =
-        -Math.abs(
-            Array.from(localSaleId)
-                .reduce(
-                    (hash, char) =>
-                        ((hash << 5) - hash) +
-                        char.charCodeAt(0),
-                    0
-                )
-        );
+    const items = await db.getAllAsync<{
+        productName: string;
+        quantity: number;
+        unitPrice: number;
+        total: number;
+    }>(
+        `
+        SELECT productName, quantity, unitPrice, total
+        FROM sale_items
+        WHERE localSaleId = ?
+        ORDER BY id ASC
+        `,
+        localSaleId
+    );
 
     const cachedUser = await getUser();
 
     return {
-        saleId:
-            sale.serverSaleId ??
-            numericLocalId,
+        saleId: sale.serverSaleId ?? numericIdForLocalSale(localSaleId),
         receiptToken: sale.receiptToken ?? undefined,
         saleDate: sale.createdAt,
         cashier: "Offline Sale",
-        paymentMethod:
-            sale.paymentMethod,
+        paymentMethod: sale.paymentMethod,
         subtotal: sale.subtotal,
         vat: sale.vat,
         total: sale.total,
         amountPaid: sale.amountPaid,
-        changeGiven:
-            sale.changeGiven,
-
-        organisationName:
-            cachedUser?.organisationName ?? "",
-
-        organisationAddress:
-            cachedUser?.organisationAddress ?? null,
-
+        changeGiven: sale.changeGiven,
+        organisationName: cachedUser?.organisationName ?? "",
+        organisationAddress: cachedUser?.organisationAddress ?? null,
         organisationPhoneNumber:
             cachedUser?.organisationPhoneNumber ?? null,
-
-        organisationEmail:
-            cachedUser?.organisationEmail ?? null,
-
-        organisationLogoUrl:
-            cachedUser?.organisationLogoUrl ?? null,
-
-        customerName:
-            sale.customerName,
+        organisationEmail: cachedUser?.organisationEmail ?? null,
+        organisationLogoUrl: cachedUser?.organisationLogoUrl ?? null,
+        customerName: sale.customerName,
         items,
     };
 }
 
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
 export async function createSale(
     sale: CreateSaleRequest
 ): Promise<CreateSaleResponse> {
-    /*
-     * =====================================================
-     * 1. GENERATE THE CLIENT SALE ID
-     * =====================================================
-     *
-     * This ID belongs to this particular sale.
-     *
-     * If the phone uploads the same sale five times,
-     * the backend will recognise all five requests
-     * as the same sale.
-     */
-    const localSaleId =
-        sale.clientSaleId ??
-        generateLocalSaleId();
-
-    const receiptToken =
-        sale.receiptToken ??
-        Crypto.randomUUID();
+    const localSaleId = sale.clientSaleId ?? generateLocalSaleId();
+    const receiptToken = sale.receiptToken ?? generateReceiptToken();
 
     const saleWithClientId: CreateSaleRequest = {
         ...sale,
@@ -391,42 +306,18 @@ export async function createSale(
         receiptToken,
     };
 
-    /*
-     * =====================================================
-     * 2. SAVE LOCALLY FIRST
-     * =====================================================
-     *
-     * The sale is now safe on the phone before we
-     * even attempt the network.
-     */
-    await saveSaleLocally(
-        saleWithClientId,
-        localSaleId
-    );
+    // 1. Persist locally first — this is our source of truth and it
+    //    deducts stock in a single transaction.
+    await saveSaleLocally(saleWithClientId, localSaleId);
 
-    /*
-     * =====================================================
-     * 3. TRY TO SYNC TO SERVER
-     * =====================================================
-     */
+    // 2. Best-effort sync to the server.
     try {
-        const response =
-            await api.post<CreateSaleResponse>(
-                "/Sales",
-                saleWithClientId
-            );
-
-        const serverSaleId =
-            response.data.saleId;
-
-        /*
-         * The server accepted the sale.
-         * Mark the local copy as synced.
-         */
-        await markSaleSynced(
-            localSaleId,
-            serverSaleId
+        const response = await api.post<CreateSaleResponse>(
+            "/Sales",
+            saleWithClientId
         );
+
+        await markSaleSynced(localSaleId, response.data.saleId);
 
         return {
             ...response.data,
@@ -434,29 +325,18 @@ export async function createSale(
             offline: false,
         };
     } catch (error: any) {
-        const status =
-            error?.response?.status;
+        const status = error?.response?.status;
 
-        /*
-         * Authentication failures are not proof that a sale
-         * is invalid. Keep the local sale and stock deduction.
-         * It can be retried after the cashier authenticates online.
-         */
+        // Auth failure: keep the sale queued. It is NOT invalid.
         if (status === 401 || status === 403) {
             console.warn(
                 `Sale ${localSaleId} remains queued because authentication or permissions were rejected.`
             );
-
             throw error;
         }
 
-        /*
-         * Other client errors may indicate invalid sale data.
-         * The sale was already saved locally and cached stock
-         * was already deducted. Since the server permanently
-         * rejected this sale, restore the local stock and
-         * prevent the sale from being retried.
-         */
+        // Permanent client-side rejection: roll back local stock
+        // and mark the sale rejected so it isn't retried forever.
         if (status && status >= 400 && status < 500) {
             const message =
                 error?.response?.data?.message ||
@@ -464,99 +344,64 @@ export async function createSale(
                 error?.message ||
                 "Sale was rejected by the server.";
 
-            await rejectLocalSale(
-                localSaleId,
-                String(message)
-            );
-
+            await rejectLocalSale(localSaleId, String(message));
             throw error;
         }
 
-        /*
-         * Network failures and server errors leave the sale
-         * in the queue for a future synchronisation attempt.
-         */
+        // Network / 5xx: keep queued, return an offline receipt.
         console.warn(
             "⚠️ Server unavailable. Sale remains in local sync queue."
         );
 
-        const localReceipt =
-            await getLocalReceipt(
-                localSaleId
-            );
+        const localReceipt = await getLocalReceipt(localSaleId);
 
         return {
             saleId:
-                localReceipt?.saleId ??
-                -Date.now(),
-
+                localReceipt?.saleId ?? -Date.now(),
             message:
                 "Sale saved locally and will sync when the server is available.",
-
             localSaleId,
             offline: true,
         };
     }
 }
 
-export async function getReceipt(
-    saleId: number
-): Promise<Receipt> {
-    /*
-     * Negative SaleId means the receipt is
-     * currently local/offline.
-     */
+export async function getReceipt(saleId: number): Promise<Receipt> {
+    // Negative ids are offline / local receipts.
     if (saleId < 0) {
-        const db =
-            await getDatabase();
+        const db = await getDatabase();
 
-        const sales =
-            await db.getAllAsync<{
-                localSaleId: string;
-            }>(
-                `
-                SELECT localSaleId
-                FROM sales
-                ORDER BY id DESC
-                `
-            );
+        // The numeric id is a hash of localSaleId, which is not
+        // directly invertible. Scan candidates cheaply, but only
+        // compare hashes — do not re-query items for non-matches.
+        const rows = await db.getAllAsync<{ localSaleId: string }>(
+            `SELECT localSaleId FROM sales ORDER BY id DESC`
+        );
 
-        for (const sale of sales) {
-            const receipt =
-                await getLocalReceipt(
-                    sale.localSaleId
-                );
-
-            if (
-                receipt?.saleId ===
-                saleId
-            ) {
-                return receipt;
+        let match: string | null = null;
+        for (const row of rows) {
+            if (numericIdForLocalSale(row.localSaleId) === saleId) {
+                match = row.localSaleId;
+                break;
             }
         }
 
-        throw new Error(
-            "Offline receipt could not be found."
-        );
+        if (!match) {
+            throw new Error("Offline receipt could not be found.");
+        }
+
+        const receipt = await getLocalReceipt(match);
+        if (!receipt) {
+            throw new Error("Offline receipt could not be found.");
+        }
+        return receipt;
     }
 
-    /*
-     * Positive SaleId means it has a
-     * server-side ID.
-     */
-    const response =
-        await api.get<Receipt>(
-            `/Sales/${saleId}`
-        );
-
+    const response = await api.get<Receipt>(`/Sales/${saleId}`);
     return response.data;
 }
 
 export async function getMySales() {
-    const response =
-        await api.get(
-            "/Sales/my-sales"
-        );
-
+    const response = await api.get("/Sales/my-sales");
     return response.data;
 }

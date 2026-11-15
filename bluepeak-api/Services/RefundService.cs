@@ -120,7 +120,19 @@ public class RefundService : IRefundService
                 $"{r.RequestedByUser?.FirstName} {r.RequestedByUser?.LastName}",
             Reason = r.Reason,
             Status = r.Status,
-            RequestedAt = r.RequestedAt
+            RequestedAt = r.RequestedAt,
+            Items = r.Sale?.Items.Select(i => new RefundItemDto
+            {
+                SaleItemId = i.SaleItemId,
+                ProductId = i.ProductId,
+                ProductName = i.Product?.ProductName ?? "Unknown Product",
+                Quantity = i.Quantity,
+                SaleUnitType = i.SaleUnitType,
+                UnitsPerPackAtSale = i.UnitsPerPackAtSale,
+                StockQuantity = i.StockQuantity,
+                UnitPrice = i.UnitPrice,
+                Total = i.Total
+            }).ToList() ?? new List<RefundItemDto>()
         }).ToList();
     }
 
@@ -345,7 +357,19 @@ public async Task<RefundDetailsDto?> GetDetailsAsync(int refundRequestId)
             CompletedAt = r.RefundRequest?.CompletedAt,
             ProcessedBy =
                 $"{r.ProcessedByUser?.FirstName} " +
-                $"{r.ProcessedByUser?.LastName}".Trim()
+                $"{r.ProcessedByUser?.LastName}".Trim(),
+            Items = r.Items.Select(i => new RefundItemDto
+            {
+                SaleItemId = i.SaleItemId,
+                ProductId = i.ProductId,
+                ProductName = i.Product?.ProductName ?? "Unknown Product",
+                Quantity = i.Quantity,
+                SaleUnitType = i.SaleUnitType,
+                UnitsPerPackAtSale = i.UnitsPerPackAtSale,
+                StockQuantity = i.StockQuantity,
+                UnitPrice = i.UnitPrice,
+                Total = i.Total
+            }).ToList()
         }).ToList();
     }
 
@@ -387,7 +411,19 @@ public async Task<RefundDetailsDto?> GetDetailsAsync(int refundRequestId)
                 $"{request.RequestedByUser?.LastName}".Trim(),
             Reason = request.Reason,
             Status = request.Status,
-            RequestedAt = request.RequestedAt
+            RequestedAt = request.RequestedAt,
+            Items = request.Sale.Items.Select(i => new RefundItemDto
+            {
+                SaleItemId = i.SaleItemId,
+                ProductId = i.ProductId,
+                ProductName = i.Product?.ProductName ?? "Unknown Product",
+                Quantity = i.Quantity,
+                SaleUnitType = i.SaleUnitType,
+                UnitsPerPackAtSale = i.UnitsPerPackAtSale,
+                StockQuantity = i.StockQuantity,
+                UnitPrice = i.UnitPrice,
+                Total = i.Total
+            }).ToList()
         };
     }
 

@@ -109,7 +109,10 @@ export async function initializeLocalDatabase(): Promise<void> {
             productCode TEXT,
             productName TEXT NOT NULL,
             sellingPrice REAL NOT NULL DEFAULT 0,
+            sellingPricePerPack REAL,
             costPrice REAL NOT NULL DEFAULT 0,
+            stockType TEXT NOT NULL DEFAULT 'SingleUnit',
+            unitsPerPack INTEGER NOT NULL DEFAULT 1,
             quantityInStock REAL NOT NULL DEFAULT 0,
             imageUrl TEXT,
             isActive INTEGER NOT NULL DEFAULT 1,
@@ -172,7 +175,7 @@ export async function initializeLocalDatabase(): Promise<void> {
     `);
 
     // ---------------------------------------------------------
-    // DATABASE MIGRATIONS
+    // DATABASE MIGRATIONS — SALES
     // ---------------------------------------------------------
 
     // Read the sales columns after creating the table.
@@ -211,6 +214,10 @@ export async function initializeLocalDatabase(): Promise<void> {
         console.log("🛠️ Database migration: added sales.receiptToken");
     }
 
+    // ---------------------------------------------------------
+    // DATABASE MIGRATIONS — SALE ITEMS
+    // ---------------------------------------------------------
+
     const saleItemsColumns = await db.getAllAsync<{ name: string }>(
         "PRAGMA table_info(sale_items);"
     );
@@ -228,6 +235,104 @@ export async function initializeLocalDatabase(): Promise<void> {
         console.log("🛠️ Database migration: added sale_items.total");
     }
 
+const updatedSaleItemsColumns = await db.getAllAsync<{
+    name: string;
+}>("PRAGMA table_info(sale_items);");
+
+const hasSaleUnitType = updatedSaleItemsColumns.some(
+    (column) => column.name === "saleUnitType"
+);
+
+if (!hasSaleUnitType) {
+    await db.execAsync(`
+        ALTER TABLE sale_items
+        ADD COLUMN saleUnitType TEXT NOT NULL DEFAULT 'SingleUnit';
+    `);
+}
+
+const hasUnitsPerPackAtSale = updatedSaleItemsColumns.some(
+    (column) => column.name === "unitsPerPackAtSale"
+);
+
+if (!hasUnitsPerPackAtSale) {
+    await db.execAsync(`
+        ALTER TABLE sale_items
+        ADD COLUMN unitsPerPackAtSale INTEGER NOT NULL DEFAULT 1;
+    `);
+}
+
+const hasStockQuantity = updatedSaleItemsColumns.some(
+    (column) => column.name === "stockQuantity"
+);
+
+if (!hasStockQuantity) {
+    await db.execAsync(`
+        ALTER TABLE sale_items
+        ADD COLUMN stockQuantity REAL NOT NULL DEFAULT 0;
+    `);
+}
+
+// Existing sales were all recorded as individual units.
+// Preserve their original stock quantities.
+await db.execAsync(`
+    UPDATE sale_items
+    SET stockQuantity = quantity
+    WHERE stockQuantity = 0;
+`);
+
+    // ---------------------------------------------------------
+    // DATABASE MIGRATIONS — PRODUCTS (pack conversion)
+    // ---------------------------------------------------------
+
+    const productColumns = await db.getAllAsync<{
+        name: string;
+    }>("PRAGMA table_info(products);");
+
+    const hasSellingPricePerPack = productColumns.some(
+        (column) => column.name === "sellingPricePerPack"
+    );
+
+    if (!hasSellingPricePerPack) {
+        await db.execAsync(`
+            ALTER TABLE products
+            ADD COLUMN sellingPricePerPack REAL;
+        `);
+
+        console.log(
+            "🛠️ Database migration: added products.sellingPricePerPack"
+        );
+    }
+
+    const hasStockType = productColumns.some(
+        (column) => column.name === "stockType"
+    );
+
+    if (!hasStockType) {
+        await db.execAsync(`
+            ALTER TABLE products
+            ADD COLUMN stockType TEXT NOT NULL DEFAULT 'SingleUnit';
+        `);
+
+        console.log(
+            "🛠️ Database migration: added products.stockType"
+        );
+    }
+
+    const hasUnitsPerPack = productColumns.some(
+        (column) => column.name === "unitsPerPack"
+    );
+
+    if (!hasUnitsPerPack) {
+        await db.execAsync(`
+            ALTER TABLE products
+            ADD COLUMN unitsPerPack INTEGER NOT NULL DEFAULT 1;
+        `);
+
+        console.log(
+            "🛠️ Database migration: added products.unitsPerPack"
+        );
+    }
+
     console.log("✅ BluePeak local database initialized");
 }
 
@@ -241,6 +346,9 @@ export async function saveProductsLocally(
         quantityInStock?: number;
         imageUrl?: string | null;
         isActive?: boolean;
+        sellingPricePerPack?: number | null;
+        stockType?: string;
+        unitsPerPack?: number;
     }[]
 ): Promise<void> {
     const db = await getDatabase();
@@ -292,20 +400,25 @@ export async function saveProductsLocally(
                     productCode,
                     productName,
                     sellingPrice,
+                    sellingPricePerPack,
                     costPrice,
+                    stockType,
+                    unitsPerPack,
                     quantityInStock,
                     imageUrl,
                     isActive,
                     updatedAt
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     productCode = excluded.productCode,
                     productName = excluded.productName,
                     sellingPrice = excluded.sellingPrice,
+                    sellingPricePerPack = excluded.sellingPricePerPack,
                     costPrice = excluded.costPrice,
-                    quantityInStock =
-                        excluded.quantityInStock,
+                    stockType = excluded.stockType,
+                    unitsPerPack = excluded.unitsPerPack,
+                    quantityInStock = excluded.quantityInStock,
                     imageUrl = excluded.imageUrl,
                     isActive = excluded.isActive,
                     updatedAt = excluded.updatedAt
@@ -314,7 +427,10 @@ export async function saveProductsLocally(
                 product.productCode,
                 product.productName,
                 product.sellingPrice,
+                product.sellingPricePerPack ?? null,
                 product.costPrice,
+                product.stockType ?? "SingleUnit",
+                product.unitsPerPack ?? 1,
                 localAvailableStock,
                 product.imageUrl ?? null,
                 product.isActive === false ? 0 : 1,
@@ -338,6 +454,9 @@ export async function syncProductsFromServer(
         quantityInStock?: number;
         imageUrl?: string | null;
         isActive?: boolean;
+        sellingPricePerPack?: number | null;
+        stockType?: string;
+        unitsPerPack?: number;
     }[]
 ): Promise<void> {
     const db = await getDatabase();
@@ -376,7 +495,6 @@ export async function syncProductsFromServer(
     );
 }
 
-
 export async function getLocalProducts() {
     const db = await getDatabase();
 
@@ -389,6 +507,9 @@ export async function getLocalProducts() {
         quantityInStock: number;
         imageUrl: string | null;
         isActive: number;
+        sellingPricePerPack: number | null;
+        stockType: string;
+        unitsPerPack: number;
     }>(
         `
         SELECT
@@ -396,7 +517,10 @@ export async function getLocalProducts() {
             productCode,
             productName,
             sellingPrice,
+            sellingPricePerPack,
             costPrice,
+            stockType,
+            unitsPerPack,
             quantityInStock,
             imageUrl,
             isActive
@@ -708,41 +832,40 @@ export async function saveLocalSale(
         // ---------------------------------------------------------
         // 2. Save the sale
         // ---------------------------------------------------------
-        
-await db.runAsync(
-    `
-    INSERT INTO sales (
-        localSaleId,
-        receiptToken,
-        userId,
-        paymentMethod,
-        amountPaid,
-        customerName,
-        subtotal,
-        vat,
-        total,
-        changeGiven,
-        profit,
-        createdAt,
-        syncStatus
-    )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `,
-    sale.localSaleId,
-    sale.receiptToken ?? null,
-    sale.userId,
-    sale.paymentMethod,
-    sale.amountPaid,
-    sale.customerName ?? null,
-    sale.subtotal,
-    sale.vat,
-    sale.total,
-    sale.changeGiven,
-    sale.profit,
-    sale.createdAt,
-    "pending"
-);
 
+        await db.runAsync(
+            `
+            INSERT INTO sales (
+                localSaleId,
+                receiptToken,
+                userId,
+                paymentMethod,
+                amountPaid,
+                customerName,
+                subtotal,
+                vat,
+                total,
+                changeGiven,
+                profit,
+                createdAt,
+                syncStatus
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `,
+            sale.localSaleId,
+            sale.receiptToken ?? null,
+            sale.userId,
+            sale.paymentMethod,
+            sale.amountPaid,
+            sale.customerName ?? null,
+            sale.subtotal,
+            sale.vat,
+            sale.total,
+            sale.changeGiven,
+            sale.profit,
+            sale.createdAt,
+            "pending"
+        );
 
         // ---------------------------------------------------------
         // 3. Save sale items

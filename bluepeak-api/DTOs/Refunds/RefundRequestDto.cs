@@ -13,4 +13,5 @@ public class RefundRequestDto
     public string Status { get; set; } = string.Empty;
 
     public DateTime RequestedAt { get; set; }
+    public List<RefundItemDto> Items { get; set; } = new();
 }
