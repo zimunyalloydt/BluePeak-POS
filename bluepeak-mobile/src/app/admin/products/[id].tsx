@@ -17,22 +17,11 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
 
 import api from "../../../services/api";
-import { getProduct,addStock,removeStock } from "../../../services/productService";
+import { getProduct,addStock,removeStock,Product, } from "../../../services/productService";
 
 import { API_SERVER } from "../../../config/api";
 
-type Product = {
-    productId: number;
-    productCode: string;
-    productName: string;
-    barcode?: string | null;
-    sellingPrice: number;
-    costPrice: number;
-    profit: number;
-    quantityInStock?: number;
-    isActive?: boolean;
-    imageUrl?: string | null;
-};
+
 
 export default function AdminProductDetails() {
     const router = useRouter();
@@ -69,7 +58,11 @@ const [stockReason, setStockReason] =
             setProductName(data.productName ?? "");
             setBarcode(data.barcode ?? "");
             setSellingPrice(String(data.sellingPrice ?? 0));
-            setCostPrice(String(data.costPrice ?? 0));
+            setCostPrice(
+    data.costPrice == null
+        ? ""
+        : String(data.costPrice)
+);
             setQuantityInStock(
                 String(data.quantityInStock ?? 0)
             );

@@ -18,15 +18,31 @@ import * as ImagePicker from "expo-image-picker";
 
 import api from "../../../services/api";
 
+type StockType = "SingleUnit" | "Pack";
+
 export default function CreateProduct() {
     const router = useRouter();
 
     const [productCode, setProductCode] = useState("");
     const [productName, setProductName] = useState("");
     const [barcode, setBarcode] = useState("");
+
     const [sellingPrice, setSellingPrice] = useState("");
     const [costPrice, setCostPrice] = useState("");
+
+    const [stockType, setStockType] =
+        useState<StockType>("SingleUnit");
+
     const [quantityInStock, setQuantityInStock] =
+        useState("0");
+
+    const [unitsPerPack, setUnitsPerPack] =
+        useState("12");
+
+    const [sellingPricePerPack, setSellingPricePerPack] =
+        useState("");
+
+    const [packQuantity, setPackQuantity] =
         useState("0");
 
     const [isActive, setIsActive] = useState(true);
@@ -35,6 +51,8 @@ export default function CreateProduct() {
         useState<any>(null);
 
     const [saving, setSaving] = useState(false);
+
+    const isPack = stockType === "Pack";
 
     const pickImage = async () => {
         try {
@@ -91,23 +109,26 @@ export default function CreateProduct() {
         }
 
         const selling = Number(sellingPrice);
-        const cost = Number(costPrice);
-        const stock = Number(quantityInStock);
+        const cost =
+            costPrice.trim() === ""
+                ? null
+                : Number(costPrice);
 
         if (
-            Number.isNaN(selling) ||
+            sellingPrice.trim() === "" ||
+            !Number.isFinite(selling) ||
             selling < 0
         ) {
             Alert.alert(
                 "Validation",
-                "Enter a valid selling price."
+                "Enter a valid individual selling price."
             );
             return;
         }
 
         if (
-            Number.isNaN(cost) ||
-            cost < 0
+            cost !== null &&
+            (!Number.isFinite(cost) || cost < 0)
         ) {
             Alert.alert(
                 "Validation",
@@ -116,16 +137,57 @@ export default function CreateProduct() {
             return;
         }
 
-        if (
-            Number.isNaN(stock) ||
-            stock < 0 ||
-            !Number.isInteger(stock)
-        ) {
-            Alert.alert(
-                "Validation",
-                "Stock must be a whole number."
-            );
-            return;
+        const stock = Number(quantityInStock);
+        const units = Number(unitsPerPack);
+        const packPrice = Number(sellingPricePerPack);
+        const packs = Number(packQuantity);
+
+        if (isPack) {
+            if (
+                !Number.isInteger(units) ||
+                units <= 0
+            ) {
+                Alert.alert(
+                    "Validation",
+                    "Units per pack must be a whole number greater than zero."
+                );
+                return;
+            }
+
+            if (
+                sellingPricePerPack.trim() === "" ||
+                !Number.isFinite(packPrice) ||
+                packPrice < 0
+            ) {
+                Alert.alert(
+                    "Validation",
+                    "Enter a valid selling price per pack."
+                );
+                return;
+            }
+
+            if (
+                packQuantity.trim() === "" ||
+                !Number.isInteger(packs) ||
+                packs < 0
+            ) {
+                Alert.alert(
+                    "Validation",
+                    "Pack quantity must be a whole number of zero or more."
+                );
+                return;
+            }
+        } else {
+            if (
+                !Number.isInteger(stock) ||
+                stock < 0
+            ) {
+                Alert.alert(
+                    "Validation",
+                    "Stock must be a whole number of zero or more."
+                );
+                return;
+            }
         }
 
         try {
@@ -153,15 +215,44 @@ export default function CreateProduct() {
                 String(selling)
             );
 
+            if (cost !== null) {
+                formData.append(
+                    "CostPrice",
+                    String(cost)
+                );
+            }
+
             formData.append(
-                "CostPrice",
-                String(cost)
+                "StockType",
+                stockType
             );
 
             formData.append(
-                "QuantityInStock",
-                String(stock)
+                "UnitsPerPack",
+                String(isPack ? units : 1)
             );
+
+            if (isPack) {
+                formData.append(
+                    "SellingPricePerPack",
+                    String(packPrice)
+                );
+
+                formData.append(
+                    "PackQuantity",
+                    String(packs)
+                );
+
+                formData.append(
+                    "QuantityInStock",
+                    "0"
+                );
+            } else {
+                formData.append(
+                    "QuantityInStock",
+                    String(stock)
+                );
+            }
 
             formData.append(
                 "IsActive",
@@ -185,9 +276,7 @@ export default function CreateProduct() {
 
                 if (extension === "png") {
                     mimeType = "image/png";
-                } else if (
-                    extension === "webp"
-                ) {
+                } else if (extension === "webp") {
                     mimeType = "image/webp";
                 }
 
@@ -215,36 +304,55 @@ export default function CreateProduct() {
                 [
                     {
                         text: "OK",
-                        onPress: () => {
-                            router.back();
-                        },
+                        onPress: () => router.back(),
                     },
                 ]
             );
         } catch (error: any) {
-            console.error(
-                "Create product error:",
-                error?.response?.data || error
-            );
+           console.error("CREATE PRODUCT DIAGNOSTICS:", {
+    message: error?.message,
+    code: error?.code,
+    status: error?.response?.status,
+    response: error?.response?.data,
+    url: error?.config?.url,
+    baseURL: error?.config?.baseURL,
+    method: error?.config?.method,
+});
+
+            const responseData =
+                error?.response?.data;
 
             const message =
-                error?.response?.data ||
-                "Failed to create product.";
+                typeof responseData === "string"
+                    ? responseData
+                    : responseData?.message ||
+                      responseData?.title ||
+                      "Failed to create product.";
 
             Alert.alert(
                 "Create Product Failed",
-                typeof message === "string"
-                    ? message
-                    : "Failed to create product."
+                message
             );
         } finally {
             setSaving(false);
         }
     };
 
-    const profit =
+    const individualProfit =
         Number(sellingPrice || 0) -
         Number(costPrice || 0);
+
+    const packProfit =
+        Number(sellingPricePerPack || 0) -
+        Number(costPrice || 0) *
+            Number(unitsPerPack || 0);
+
+    const totalIndividualStock = isPack
+        ? (
+            Number(packQuantity || 0) *
+            Number(unitsPerPack || 0)
+        )
+        : Number(quantityInStock || 0);
 
     return (
         <KeyboardAvoidingView
@@ -256,9 +364,7 @@ export default function CreateProduct() {
             }
         >
             <ScrollView
-                contentContainerStyle={
-                    styles.content
-                }
+                contentContainerStyle={styles.content}
                 keyboardShouldPersistTaps="handled"
             >
                 <View style={styles.header}>
@@ -277,6 +383,7 @@ export default function CreateProduct() {
                     <View style={{ width: 50 }} />
                 </View>
 
+                {/* Product Image */}
                 <View style={styles.imageCard}>
                     {selectedImage?.uri ? (
                         <Image
@@ -286,16 +393,8 @@ export default function CreateProduct() {
                             style={styles.image}
                         />
                     ) : (
-                        <View
-                            style={
-                                styles.imagePlaceholder
-                            }
-                        >
-                            <Text
-                                style={
-                                    styles.placeholderText
-                                }
-                            >
+                        <View style={styles.imagePlaceholder}>
+                            <Text style={styles.placeholderText}>
                                 No Image
                             </Text>
                         </View>
@@ -305,11 +404,7 @@ export default function CreateProduct() {
                         style={styles.imageButton}
                         onPress={pickImage}
                     >
-                        <Text
-                            style={
-                                styles.imageButtonText
-                            }
-                        >
+                        <Text style={styles.imageButtonText}>
                             {selectedImage
                                 ? "Change Image"
                                 : "Choose Product Image"}
@@ -317,6 +412,7 @@ export default function CreateProduct() {
                     </Pressable>
                 </View>
 
+                {/* Product Information */}
                 <View style={styles.card}>
                     <Text style={styles.sectionTitle}>
                         Product Information
@@ -358,13 +454,145 @@ export default function CreateProduct() {
                     />
                 </View>
 
+                {/* Stock Type */}
+                <View style={styles.card}>
+                    <Text style={styles.sectionTitle}>
+                        Stock Configuration
+                    </Text>
+
+                    <Text style={styles.label}>
+                        How is this product stocked?
+                    </Text>
+
+                    <View style={styles.typeSelector}>
+                        <Pressable
+                            style={[
+                                styles.typeOption,
+                                !isPack && styles.typeOptionActive,
+                            ]}
+                            onPress={() =>
+                                setStockType("SingleUnit")
+                            }
+                        >
+                            <Text
+                                style={[
+                                    styles.typeOptionText,
+                                    !isPack &&
+                                        styles.typeOptionTextActive,
+                                ]}
+                            >
+                                Single Units
+                            </Text>
+
+                            <Text
+                                style={[
+                                    styles.typeDescription,
+                                    !isPack &&
+                                        styles.typeDescriptionActive,
+                                ]}
+                            >
+                                Individual items
+                            </Text>
+                        </Pressable>
+
+                        <Pressable
+                            style={[
+                                styles.typeOption,
+                                isPack && styles.typeOptionActive,
+                            ]}
+                            onPress={() =>
+                                setStockType("Pack")
+                            }
+                        >
+                            <Text
+                                style={[
+                                    styles.typeOptionText,
+                                    isPack &&
+                                        styles.typeOptionTextActive,
+                                ]}
+                            >
+                                Packs
+                            </Text>
+
+                            <Text
+                                style={[
+                                    styles.typeDescription,
+                                    isPack &&
+                                        styles.typeDescriptionActive,
+                                ]}
+                            >
+                                Boxes containing multiple units
+                            </Text>
+                        </Pressable>
+                    </View>
+
+                    {isPack ? (
+                        <>
+                            <Text style={styles.label}>
+                                Units Per Pack *
+                            </Text>
+
+                            <TextInput
+                                style={styles.input}
+                                value={unitsPerPack}
+                                onChangeText={setUnitsPerPack}
+                                placeholder="e.g. 12"
+                                keyboardType="number-pad"
+                            />
+
+                            <Text style={styles.helperText}>
+                                Number of individual items inside one pack.
+                            </Text>
+
+                            <Text style={styles.label}>
+                                Number of Packs in Stock *
+                            </Text>
+
+                            <TextInput
+                                style={styles.input}
+                                value={packQuantity}
+                                onChangeText={setPackQuantity}
+                                placeholder="e.g. 10"
+                                keyboardType="number-pad"
+                            />
+
+                            <View style={styles.stockSummary}>
+                                <Text style={styles.stockSummaryLabel}>
+                                    Total individual units
+                                </Text>
+
+                                <Text style={styles.stockSummaryValue}>
+                                    {Number.isInteger(totalIndividualStock)
+                                        ? totalIndividualStock
+                                        : 0}
+                                </Text>
+                            </View>
+                        </>
+                    ) : (
+                        <>
+                            <Text style={styles.label}>
+                                Individual Units in Stock
+                            </Text>
+
+                            <TextInput
+                                style={styles.input}
+                                value={quantityInStock}
+                                onChangeText={setQuantityInStock}
+                                placeholder="0"
+                                keyboardType="number-pad"
+                            />
+                        </>
+                    )}
+                </View>
+
+                {/* Pricing */}
                 <View style={styles.card}>
                     <Text style={styles.sectionTitle}>
                         Pricing
                     </Text>
 
                     <Text style={styles.label}>
-                        Selling Price *
+                        Individual Selling Price *
                     </Text>
 
                     <TextInput
@@ -375,8 +603,32 @@ export default function CreateProduct() {
                         keyboardType="decimal-pad"
                     />
 
+                    <Text style={styles.helperText}>
+                        Price charged when selling one individual item.
+                    </Text>
+
+                    {isPack && (
+                        <>
+                            <Text style={styles.label}>
+                                Selling Price Per Pack *
+                            </Text>
+
+                            <TextInput
+                                style={styles.input}
+                                value={sellingPricePerPack}
+                                onChangeText={setSellingPricePerPack}
+                                placeholder="0.00"
+                                keyboardType="decimal-pad"
+                            />
+
+                            <Text style={styles.helperText}>
+                                Price charged when selling one complete pack.
+                            </Text>
+                        </>
+                    )}
+
                     <Text style={styles.label}>
-                        Cost Price *
+                        Cost Price (Optional)
                     </Text>
 
                     <TextInput
@@ -387,53 +639,43 @@ export default function CreateProduct() {
                         keyboardType="decimal-pad"
                     />
 
+                    <Text style={styles.helperText}>
+                        Cost price per individual unit.
+                    </Text>
+
                     <View style={styles.profitBox}>
                         <Text style={styles.profitLabel}>
-                            Profit per item
+                            Individual Profit
                         </Text>
 
                         <Text style={styles.profitValue}>
-                            ${profit.toFixed(2)}
+                            ${individualProfit.toFixed(2)}
                         </Text>
                     </View>
+
+                    {isPack && (
+                        <View style={styles.profitBox}>
+                            <Text style={styles.profitLabel}>
+                                Pack Profit
+                            </Text>
+
+                            <Text style={styles.profitValue}>
+                                ${packProfit.toFixed(2)}
+                            </Text>
+                        </View>
+                    )}
                 </View>
 
+                {/* Product Status */}
                 <View style={styles.card}>
-                    <Text style={styles.sectionTitle}>
-                        Inventory
-                    </Text>
-
-                    <Text style={styles.label}>
-                        Quantity in Stock
-                    </Text>
-
-                    <TextInput
-                        style={styles.input}
-                        value={quantityInStock}
-                        onChangeText={
-                            setQuantityInStock
-                        }
-                        placeholder="0"
-                        keyboardType="number-pad"
-                    />
-
                     <View style={styles.statusRow}>
                         <View>
-                            <Text
-                                style={
-                                    styles.statusTitle
-                                }
-                            >
+                            <Text style={styles.statusTitle}>
                                 Product Active
                             </Text>
 
-                            <Text
-                                style={
-                                    styles.statusDescription
-                                }
-                            >
-                                Active products can be
-                                sold.
+                            <Text style={styles.statusDescription}>
+                                Active products can be sold.
                             </Text>
                         </View>
 
@@ -444,25 +686,19 @@ export default function CreateProduct() {
                     </View>
                 </View>
 
+                {/* Create */}
                 <Pressable
                     style={[
                         styles.createButton,
-                        saving &&
-                            styles.disabled,
+                        saving && styles.disabled,
                     ]}
                     onPress={createProduct}
                     disabled={saving}
                 >
                     {saving ? (
-                        <ActivityIndicator
-                            color="#fff"
-                        />
+                        <ActivityIndicator color="#fff" />
                     ) : (
-                        <Text
-                            style={
-                                styles.createButtonText
-                            }
-                        >
+                        <Text style={styles.createButtonText}>
                             Create Product
                         </Text>
                     )}
@@ -577,6 +813,76 @@ const styles = StyleSheet.create({
         backgroundColor: "#fff",
     },
 
+    helperText: {
+        fontSize: 12,
+        color: "#64748b",
+        marginTop: 6,
+        lineHeight: 18,
+    },
+
+    typeSelector: {
+        flexDirection: "row",
+        gap: 10,
+        marginTop: 4,
+    },
+
+    typeOption: {
+        flex: 1,
+        borderWidth: 1,
+        borderColor: "#d1d5db",
+        borderRadius: 12,
+        padding: 13,
+        backgroundColor: "#fff",
+    },
+
+    typeOptionActive: {
+        borderColor: "#2563eb",
+        backgroundColor: "#eff6ff",
+    },
+
+    typeOptionText: {
+        fontSize: 14,
+        fontWeight: "800",
+        color: "#475569",
+        textAlign: "center",
+    },
+
+    typeOptionTextActive: {
+        color: "#1d4ed8",
+    },
+
+    typeDescription: {
+        fontSize: 11,
+        color: "#64748b",
+        textAlign: "center",
+        marginTop: 5,
+    },
+
+    typeDescriptionActive: {
+        color: "#1d4ed8",
+    },
+
+    stockSummary: {
+        marginTop: 16,
+        padding: 14,
+        borderRadius: 10,
+        backgroundColor: "#eff6ff",
+        flexDirection: "row",
+        justifyContent: "space-between",
+        alignItems: "center",
+    },
+
+    stockSummaryLabel: {
+        color: "#1e40af",
+        fontWeight: "700",
+    },
+
+    stockSummaryValue: {
+        color: "#1d4ed8",
+        fontSize: 20,
+        fontWeight: "800",
+    },
+
     profitBox: {
         marginTop: 16,
         padding: 14,
@@ -598,7 +904,6 @@ const styles = StyleSheet.create({
     },
 
     statusRow: {
-        marginTop: 20,
         flexDirection: "row",
         alignItems: "center",
         justifyContent: "space-between",

@@ -1,8 +1,38 @@
 import api from "./api";
 
 export async function getProducts() {
-    const response = await api.get("/product");
-    return response.data;
+    try {
+        const response = await api.get("/Product");
+
+        console.log("========== SERVER PRODUCTS ==========");
+        console.log("Server product count:", response.data.length);
+        console.log("Server products:", response.data);
+
+        response.data.forEach((product) => {
+    console.log("PRODUCT COST CHECK:", {
+        productId: product.productId,
+        productName: product.productName,
+        costPrice: product.costPrice,
+        sellingPrice: product.sellingPrice,
+    });
+});
+
+        if (!Array.isArray(response.data)) {
+            throw new Error("Invalid products response from server.");
+        }
+
+        console.log("========== PRODUCT RETRIEVAL COMPLETE ==========");
+
+        return response.data;
+
+    } catch (error) {
+        console.error(
+            "========== PRODUCT FETCH FAILED ==========",
+            error.response?.data || error
+        );
+
+        throw error;
+    }
 }
 
 export async function createProduct(formData) {

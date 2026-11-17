@@ -110,7 +110,7 @@ export async function initializeLocalDatabase(): Promise<void> {
             productName TEXT NOT NULL,
             sellingPrice REAL NOT NULL DEFAULT 0,
             sellingPricePerPack REAL,
-            costPrice REAL NOT NULL DEFAULT 0,
+            costPrice REAL DEFAULT NULL,
             stockType TEXT NOT NULL DEFAULT 'SingleUnit',
             unitsPerPack INTEGER NOT NULL DEFAULT 1,
             quantityInStock REAL NOT NULL DEFAULT 0,
@@ -322,6 +322,83 @@ await db.execAsync(`
         (column) => column.name === "unitsPerPack"
     );
 
+    // ---------------------------------------------------------
+// DATABASE MIGRATION — ALLOW NULL PRODUCT COST PRICE
+// ---------------------------------------------------------
+
+const currentProductColumns = await db.getAllAsync<{
+    name: string;
+    notnull: number;
+}>("PRAGMA table_info(products);");
+
+const costPriceColumn = currentProductColumns.find(
+    (column) => column.name === "costPrice"
+);
+
+if (costPriceColumn?.notnull === 1) {
+    console.log(
+        "🛠️ Migrating products.costPrice to allow NULL..."
+    );
+
+    await db.execAsync(`
+        BEGIN TRANSACTION;
+
+        CREATE TABLE products_new (
+            id INTEGER PRIMARY KEY NOT NULL,
+            productCode TEXT,
+            productName TEXT NOT NULL,
+            sellingPrice REAL NOT NULL DEFAULT 0,
+            sellingPricePerPack REAL,
+            costPrice REAL DEFAULT NULL,
+            stockType TEXT NOT NULL DEFAULT 'SingleUnit',
+            unitsPerPack INTEGER NOT NULL DEFAULT 1,
+            quantityInStock REAL NOT NULL DEFAULT 0,
+            imageUrl TEXT,
+            isActive INTEGER NOT NULL DEFAULT 1,
+            updatedAt TEXT
+        );
+
+        INSERT INTO products_new (
+            id,
+            productCode,
+            productName,
+            sellingPrice,
+            sellingPricePerPack,
+            costPrice,
+            stockType,
+            unitsPerPack,
+            quantityInStock,
+            imageUrl,
+            isActive,
+            updatedAt
+        )
+        SELECT
+            id,
+            productCode,
+            productName,
+            sellingPrice,
+            sellingPricePerPack,
+            costPrice,
+            stockType,
+            unitsPerPack,
+            quantityInStock,
+            imageUrl,
+            isActive,
+            updatedAt
+        FROM products;
+
+        DROP TABLE products;
+
+        ALTER TABLE products_new RENAME TO products;
+
+        COMMIT;
+    `);
+
+    console.log(
+        "✅ Migration complete: products.costPrice now accepts NULL."
+    );
+}
+
     if (!hasUnitsPerPack) {
         await db.execAsync(`
             ALTER TABLE products
@@ -342,7 +419,7 @@ export async function saveProductsLocally(
         productCode: string;
         productName: string;
         sellingPrice: number;
-        costPrice: number;
+        costPrice: number | null;
         quantityInStock?: number;
         imageUrl?: string | null;
         isActive?: boolean;
@@ -367,10 +444,17 @@ export async function saveProductsLocally(
                 reservedQuantity: number;
             }>(
                 `
-                SELECT
-                    COALESCE(SUM(si.quantity), 0)
-                    AS reservedQuantity
-                FROM sale_items si
+               SELECT
+    COALESCE(SUM(
+        CASE
+            WHEN si.stockQuantity > 0
+                THEN si.stockQuantity
+            ELSE si.quantity
+                 * COALESCE(si.unitsPerPackAtSale, 1)
+        END
+    ), 0) AS reservedQuantity
+FROM sale_items si
+
                 INNER JOIN sync_queue q
                     ON q.localSaleId = si.localSaleId
                 WHERE
@@ -428,7 +512,7 @@ export async function saveProductsLocally(
                 product.productName,
                 product.sellingPrice,
                 product.sellingPricePerPack ?? null,
-                product.costPrice,
+                product.costPrice ?? null,
                 product.stockType ?? "SingleUnit",
                 product.unitsPerPack ?? 1,
                 localAvailableStock,
@@ -450,7 +534,7 @@ export async function syncProductsFromServer(
         productCode: string;
         productName: string;
         sellingPrice: number;
-        costPrice: number;
+        costPrice: number | null;
         quantityInStock?: number;
         imageUrl?: string | null;
         isActive?: boolean;
@@ -503,7 +587,7 @@ export async function getLocalProducts() {
         productCode: string;
         productName: string;
         sellingPrice: number;
-        costPrice: number;
+        costPrice: number | null;
         quantityInStock: number;
         imageUrl: string | null;
         isActive: number;
@@ -534,9 +618,11 @@ export async function getLocalProducts() {
         ...product,
 
         // Calculate profit for locally cached products.
-        profit:
-            Number(product.sellingPrice) -
-            Number(product.costPrice),
+       profit:
+    product.costPrice === null
+        ? null
+        : Number(product.sellingPrice) -
+          Number(product.costPrice),
 
         isActive: product.isActive === 1,
     }));
@@ -588,21 +674,25 @@ export async function getLocalSale(
         return null;
     }
 
-    const items = await db.getAllAsync<LocalSaleItem>(
-        `
-        SELECT
-            productId,
-            productName,
-            quantity,
-            unitPrice,
-            costPrice,
-            total
-        FROM sale_items
-        WHERE localSaleId = ?
-        ORDER BY id ASC
-        `,
-        localSaleId
-    );
+ const items = await db.getAllAsync<LocalSaleItem>(
+    `
+    SELECT
+        productId,
+        productName,
+        quantity,
+        unitPrice,
+        costPrice,
+        total,
+        saleUnitType,
+        unitsPerPackAtSale,
+        stockQuantity
+    FROM sale_items
+    WHERE localSaleId = ?
+    ORDER BY id ASC
+    `,
+    localSaleId
+);
+    
 
     return {
         localSaleId: sale.localSaleId,
@@ -656,8 +746,12 @@ export type LocalSaleItem = {
     productName: string;
     quantity: number;
     unitPrice: number;
-    costPrice: number;
+    costPrice: number | null;
     total: number;
+
+    saleUnitType: "SingleUnit" | "Pack";
+    unitsPerPackAtSale: number;
+    stockQuantity: number;
 };
 
 export type LocalSale = {
@@ -801,34 +895,32 @@ export async function saveLocalSale(
         // ---------------------------------------------------------
         // 1. Verify cached stock for every item BEFORE saving sale
         // ---------------------------------------------------------
-        for (const item of sale.items) {
-            const product = await db.getFirstAsync<{
-                quantityInStock: number;
-            }>(
-                `
-                SELECT quantityInStock
-                FROM products
-                WHERE id = ?
-                `,
-                item.productId
-            );
+        
+for (const item of sale.items) {
+    const product = await db.getFirstAsync<{
+        quantityInStock: number;
+    }>(
+        `
+        SELECT quantityInStock
+        FROM products
+        WHERE id = ?
+        `,
+        item.productId
+    );
 
-            const availableStock =
-                product?.quantityInStock ?? 0;
+    const availableStock =
+        Number(product?.quantityInStock ?? 0);
 
-            if (availableStock <= 0) {
-                throw new Error(
-                    `${item.productName} is out of stock.`
-                );
-            }
+    const stockRequired = item.stockQuantity;
 
-            if (availableStock < item.quantity) {
-                throw new Error(
-                    `Only ${availableStock} unit(s) of ${item.productName} are available.`
-                );
-            }
-        }
-
+    if (availableStock < stockRequired) {
+        throw new Error(
+            `Insufficient stock for ${item.productName}. ` +
+            `Available: ${availableStock} individual units; ` +
+            `required: ${stockRequired}.`
+        );
+    }
+}
         // ---------------------------------------------------------
         // 2. Save the sale
         // ---------------------------------------------------------
@@ -871,40 +963,43 @@ export async function saveLocalSale(
         // 3. Save sale items
         // ---------------------------------------------------------
         for (const item of sale.items) {
-            await db.runAsync(
-                `
-                INSERT INTO sale_items (
-                    localSaleId,
-                    productId,
-                    productName,
-                    quantity,
-                    unitPrice,
-                    costPrice,
-                    total
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                `,
-                sale.localSaleId,
-                item.productId,
-                item.productName,
-                item.quantity,
-                item.unitPrice,
-                item.costPrice,
-                item.total
-            );
+     await db.runAsync(
+    `
+    INSERT INTO sale_items (
+        localSaleId,
+        productId,
+        productName,
+        quantity,
+        unitPrice,
+        costPrice,
+        total,
+        saleUnitType,
+        unitsPerPackAtSale,
+        stockQuantity
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `,
+    sale.localSaleId,
+    item.productId,
+    item.productName,
+    item.quantity,
+    item.unitPrice,
+    item.costPrice,
+    item.total,
+    item.saleUnitType,
+    item.unitsPerPackAtSale,
+    item.stockQuantity
+);
 
-            // -----------------------------------------------------
-            // 4. Deduct stock locally
-            // -----------------------------------------------------
-            await db.runAsync(
-                `
-                UPDATE products
-                SET quantityInStock = quantityInStock - ?
-                WHERE id = ?
-                `,
-                item.quantity,
-                item.productId
-            );
+await db.runAsync(
+    `
+    UPDATE products
+    SET quantityInStock = quantityInStock - ?
+    WHERE id = ?
+    `,
+    item.stockQuantity,
+    item.productId
+);
         }
 
         // ---------------------------------------------------------
@@ -939,12 +1034,13 @@ export async function rejectLocalSale(
     await db.withTransactionAsync(async () => {
         const items = await db.getAllAsync<{
             productId: number;
-            quantity: number;
+            stockQuantity: number;
         }>(
             `
             SELECT
                 productId,
-                quantity
+                stockQuantity
+                
             FROM sale_items
             WHERE localSaleId = ?
             `,
@@ -961,7 +1057,7 @@ export async function rejectLocalSale(
                     quantityInStock + ?
                 WHERE id = ?
                 `,
-                item.quantity,
+                item.stockQuantity,
                 item.productId
             );
         }

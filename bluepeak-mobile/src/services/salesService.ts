@@ -13,6 +13,9 @@ export interface SaleItem {
     productName?: string;
     unitPrice?: number;
     costPrice?: number;
+    saleUnitType: "SingleUnit" | "Pack";
+    unitsPerPackAtSale: number;
+    stockQuantity: number;
 }
 
 export interface CreateSaleRequest {
@@ -159,17 +162,20 @@ async function saveSaleLocally(
 
         createdAt,
 
-        items: sale.items.map((item) => ({
-            productId: item.productId,
-            productName:
-                item.productName ?? `Product ${item.productId}`,
-            quantity: item.quantity,
-            unitPrice: Number(item.unitPrice ?? 0),
-            costPrice: Number(item.costPrice ?? 0),
-            total:
-                Number(item.unitPrice ?? 0) *
-                Number(item.quantity),
-        })),
+   items: sale.items.map((item) => ({
+    productId: item.productId,
+    productName:
+        item.productName ?? `Product ${item.productId}`,
+    quantity: item.quantity,
+    unitPrice: Number(item.unitPrice ?? 0),
+    costPrice: Number(item.costPrice ?? 0),
+    total:
+        Number(item.unitPrice ?? 0) *
+        Number(item.quantity),
+    saleUnitType: item.saleUnitType,
+    unitsPerPackAtSale: item.unitsPerPackAtSale,
+    stockQuantity: item.stockQuantity,
+})),
     });
 
     console.log(

@@ -5,6 +5,7 @@ import React, {
     useRef,
     useState,
 } from "react";
+import { printerService } from "../../services/printerService";
 
 import {
     ActivityIndicator,
@@ -27,7 +28,6 @@ import { useRouter } from "expo-router";
 
 import TaskAlertModal from "../../components/TaskAlertModal";
 import { useAuth } from "../../context/AuthContext";
-import { printerService } from "../../services/printerService";
 import {
     startNotificationConnection,
     stopNotificationConnection,
@@ -47,9 +47,14 @@ import {
     getReceipt,
 } from "../../services/salesService";
 
+type SaleUnitType = "SingleUnit" | "Pack";
+
 type CartItem = {
     product: Product;
     quantity: number;
+    saleUnitType: SaleUnitType;
+    unitsPerPackAtSale: number;
+    stockQuantity: number;
 };
 
 import { API_SERVER } from "../../config/api";
@@ -58,15 +63,11 @@ export default function CashierScreen() {
     const router = useRouter();
     const { user, logout } = useAuth();
     console.log("CASHIER SCREEN MOUNTED", {
-    userId: user?.userId,
-    username: user?.username,
-    organisationId: user?.organisationId,
-});
-    console.log("CASHIER SCREEN MOUNTED", {
-    userId: user?.userId,
-    username: user?.username,
-    organisationId: user?.organisationId,
-});
+        userId: user?.userId,
+        username: user?.username,
+        organisationId: user?.organisationId,
+    });
+
     const { width } = useWindowDimensions();
 
     const numColumns = width >= 768 ? 3 : 2;
@@ -74,14 +75,14 @@ export default function CashierScreen() {
     const scrollViewRef = useRef<ScrollView>(null);
     const checkoutY = useRef(0);
 
-    const [printingTest, setPrintingTest] = useState(false);
-    const [printerConnected, setPrinterConnected] = useState(false);
-
     const [products, setProducts] = useState<Product[]>([]);
     const [cart, setCart] = useState<CartItem[]>([]);
     const [selectedProduct, setSelectedProduct] =
         useState<Product | null>(null);
     const [quantityInput, setQuantityInput] = useState("1");
+
+    const [selectedSaleUnitType, setSelectedSaleUnitType] =
+        useState<SaleUnitType>("SingleUnit");
     const [quantityModalVisible, setQuantityModalVisible] =
         useState(false);
 
@@ -100,46 +101,6 @@ export default function CashierScreen() {
     const [successModalVisible, setSuccessModalVisible] = useState(false);
     const [successSaleMessage, setSuccessSaleMessage] = useState("");
     const [successChange, setSuccessChange] = useState(0);
-
-    // ---- Printer --------------------------------------------------------
-
-    const handleTestPrinter = async () => {
-        try {
-            setPrintingTest(true);
-
-            const bluetoothEnabled =
-                await printerService.isBluetoothEnabled();
-
-            if (!bluetoothEnabled) {
-                Alert.alert(
-                    "Bluetooth Disabled",
-                    "Please turn on Bluetooth and try again."
-                );
-                return;
-            }
-
-            await printerService.testPrint();
-
-            setPrinterConnected(true);
-
-            Alert.alert(
-                "Print Successful",
-                "The BluePeak test receipt was sent to the printer."
-            );
-        } catch (error: any) {
-            console.error("Printer test failed:", error);
-
-            setPrinterConnected(false);
-
-            Alert.alert(
-                "Printer Error",
-                error?.message ||
-                    "Unable to connect to the Bluetooth printer."
-            );
-        } finally {
-            setPrintingTest(false);
-        }
-    };
 
     // ---- Products -------------------------------------------------------
 
@@ -300,45 +261,81 @@ export default function CashierScreen() {
         });
     }, [products, search]);
 
+    const getUnitsPerPack = (product: Product): number => {
+        const units = Number(product.unitsPerPack);
+        return Number.isInteger(units) && units > 0 ? units : 1;
+    };
+
+    const getSaleUnitPrice = (
+        product: Product,
+        saleUnitType: SaleUnitType
+    ): number => {
+        if (saleUnitType === "Pack") {
+            return Number(product.sellingPricePerPack ?? 0);
+        }
+
+        return Number(product.sellingPrice ?? 0);
+    };
+
+    const getStockRequired = (
+        quantity: number,
+        saleUnitType: SaleUnitType,
+        unitsPerPack: number
+    ): number => {
+        return quantity * (
+            saleUnitType === "Pack" ? unitsPerPack : 1
+        );
+    };
+
+    const getCartStockUsed = (productId: number): number => {
+        return cart
+            .filter(item => item.product.productId === productId)
+            .reduce((total, item) => total + item.stockQuantity, 0);
+    };
+
     // ---- Cart -----------------------------------------------------------
 
-    const addToCart = (product: Product, quantity: number) => {
+    const addToCart = (
+        product: Product,
+        quantity: number,
+        saleUnitType: SaleUnitType
+    ) => {
         if (quantity <= 0) return;
 
-        const availableStock = product.quantityInStock ?? 0;
+        const unitsPerPack = getUnitsPerPack(product);
+        const stockRequired = getStockRequired(
+            quantity,
+            saleUnitType,
+            unitsPerPack
+        );
 
-        if (availableStock <= 0) {
+        const availableStock = Number(product.quantityInStock ?? 0);
+        const alreadyUsed = getCartStockUsed(product.productId);
+
+        if (alreadyUsed + stockRequired > availableStock) {
             Alert.alert(
-                "Out of Stock",
-                `${product.productName} has no stock available to sell.`
+                "Insufficient Stock",
+                `${product.productName} does not have enough stock.\n\nAvailable: ${availableStock}\nAlready allocated: ${alreadyUsed}\nRequested: ${stockRequired}`
             );
             return;
         }
 
-        setCart((currentCart) => {
+        setCart(currentCart => {
             const existing = currentCart.find(
-                (item) =>
-                    item.product.productId === product.productId
+                item =>
+                    item.product.productId === product.productId &&
+                    item.saleUnitType === saleUnitType
             );
 
-            const currentQuantity = existing?.quantity ?? 0;
-            const requestedTotal = currentQuantity + quantity;
-
-            if (requestedTotal > availableStock) {
-                Alert.alert(
-                    "Insufficient Stock",
-                    `${product.productName} has only ${availableStock} unit(s) available.\n\nAlready in cart: ${currentQuantity}\nRequested: ${quantity}`
-                );
-
-                return currentCart;
-            }
-
             if (existing) {
-                return currentCart.map((item) =>
-                    item.product.productId === product.productId
+                return currentCart.map(item =>
+                    item.product.productId === product.productId &&
+                    item.saleUnitType === saleUnitType
                         ? {
                               ...item,
-                              quantity: requestedTotal,
+                              quantity: item.quantity + quantity,
+                              stockQuantity:
+                                  item.stockQuantity + stockRequired,
                           }
                         : item
                 );
@@ -349,6 +346,10 @@ export default function CashierScreen() {
                 {
                     product,
                     quantity,
+                    saleUnitType,
+                    unitsPerPackAtSale:
+                        saleUnitType === "Pack" ? unitsPerPack : 1,
+                    stockQuantity: stockRequired,
                 },
             ];
         });
@@ -358,18 +359,19 @@ export default function CashierScreen() {
     };
 
     const openQuantityModal = (product: Product) => {
-        const stock = product.quantityInStock ?? 0;
+        const stock = Number(product.quantityInStock ?? 0);
 
         if (stock <= 0) {
             Alert.alert(
                 "Out of Stock",
-                `${product.productName} has no stock available to sell.`
+                `${product.productName} has no stock available.`
             );
             return;
         }
 
         setSelectedProduct(product);
         setQuantityInput("1");
+        setSelectedSaleUnitType("SingleUnit");
         setQuantityModalVisible(true);
     };
 
@@ -377,22 +379,19 @@ export default function CashierScreen() {
         if (!selectedProduct) return;
 
         const current = Number(quantityInput) || 0;
+        const factor =
+            selectedSaleUnitType === "Pack"
+                ? getUnitsPerPack(selectedProduct)
+                : 1;
+
         const availableStock =
-            selectedProduct.quantityInStock ?? 0;
+            Number(selectedProduct.quantityInStock ?? 0) -
+            getCartStockUsed(selectedProduct.productId);
 
-        const existingCartItem = cart.find(
-            (item) =>
-                item.product.productId ===
-                selectedProduct.productId
-        );
-
-        const alreadyInCart =
-            existingCartItem?.quantity ?? 0;
-
-        if (alreadyInCart + current >= availableStock) {
+        if ((current + 1) * factor > availableStock) {
             Alert.alert(
                 "Stock Limit Reached",
-                `Only ${availableStock} unit(s) of ${selectedProduct.productName} are available.`
+                "There is not enough stock for that quantity."
             );
             return;
         }
@@ -402,6 +401,7 @@ export default function CashierScreen() {
 
     const decreaseModalQuantity = () => {
         const current = Number(quantityInput) || 1;
+
         if (current > 1) {
             setQuantityInput(String(current - 1));
         }
@@ -420,81 +420,106 @@ export default function CashierScreen() {
             return;
         }
 
+        const factor =
+            selectedSaleUnitType === "Pack"
+                ? getUnitsPerPack(selectedProduct)
+                : 1;
+
         const availableStock =
-            selectedProduct.quantityInStock ?? 0;
+            Number(selectedProduct.quantityInStock ?? 0) -
+            getCartStockUsed(selectedProduct.productId);
 
-        if (availableStock <= 0) {
-            Alert.alert(
-                "Out of Stock",
-                `${selectedProduct.productName} has no stock available to sell.`
-            );
-            return;
-        }
-
-        const existingCartItem = cart.find(
-            (item) =>
-                item.product.productId ===
-                selectedProduct.productId
-        );
-
-        const alreadyInCart =
-            existingCartItem?.quantity ?? 0;
-
-        if (alreadyInCart + quantity > availableStock) {
+        if (quantity * factor > availableStock) {
             Alert.alert(
                 "Insufficient Stock",
-                `Only ${availableStock} unit(s) of ${selectedProduct.productName} are available.\n\nAlready in cart: ${alreadyInCart}`
+                "The requested quantity exceeds the remaining stock."
             );
             return;
         }
 
-        addToCart(selectedProduct, quantity);
+        addToCart(
+            selectedProduct,
+            quantity,
+            selectedSaleUnitType
+        );
     };
 
-    const removeFromCart = (productId: number) => {
-        setCart((currentCart) =>
+    const removeFromCart = (
+        productId: number,
+        saleUnitType: SaleUnitType
+    ) => {
+        setCart(currentCart =>
             currentCart.filter(
-                (item) => item.product.productId !== productId
+                item =>
+                    !(
+                        item.product.productId === productId &&
+                        item.saleUnitType === saleUnitType
+                    )
             )
         );
     };
 
-    const increaseQuantity = (productId: number) => {
-        setCart((currentCart) =>
-            currentCart.map((item) => {
-                if (item.product.productId !== productId) {
-                    return item;
-                }
+    const increaseQuantity = (
+        productId: number,
+        saleUnitType: SaleUnitType
+    ) => {
+        setCart(currentCart => {
+            const target = currentCart.find(
+                item =>
+                    item.product.productId === productId &&
+                    item.saleUnitType === saleUnitType
+            );
 
-                const availableStock =
-                    item.product.quantityInStock ?? 0;
+            if (!target) return currentCart;
 
-                if (item.quantity >= availableStock) {
-                    Alert.alert(
-                        "Stock Limit Reached",
-                        `Only ${availableStock} unit(s) of ${item.product.productName} are available.`
-                    );
+            const alreadyUsed = currentCart
+                .filter(item => item.product.productId === productId)
+                .reduce((total, item) => total + item.stockQuantity, 0);
 
-                    return item;
-                }
+            const factor = target.unitsPerPackAtSale;
+            const availableStock =
+                Number(target.product.quantityInStock ?? 0);
 
-                return {
-                    ...item,
-                    quantity: item.quantity + 1,
-                };
-            })
-        );
+            if (alreadyUsed + factor > availableStock) {
+                Alert.alert(
+                    "Stock Limit Reached",
+                    `Not enough stock available for ${target.product.productName}.`
+                );
+                return currentCart;
+            }
+
+            return currentCart.map(item =>
+                item.product.productId === productId &&
+                item.saleUnitType === saleUnitType
+                    ? {
+                          ...item,
+                          quantity: item.quantity + 1,
+                          stockQuantity: item.stockQuantity + factor,
+                      }
+                    : item
+            );
+        });
     };
 
-    const decreaseQuantity = (productId: number) => {
-        setCart((currentCart) =>
+    const decreaseQuantity = (
+        productId: number,
+        saleUnitType: SaleUnitType
+    ) => {
+        setCart(currentCart =>
             currentCart
-                .map((item) =>
-                    item.product.productId === productId
-                        ? { ...item, quantity: item.quantity - 1 }
+                .map(item =>
+                    item.product.productId === productId &&
+                    item.saleUnitType === saleUnitType
+                        ? {
+                              ...item,
+                              quantity: item.quantity - 1,
+                              stockQuantity:
+                                  item.stockQuantity -
+                                  item.unitsPerPackAtSale,
+                          }
                         : item
                 )
-                .filter((item) => item.quantity > 0)
+                .filter(item => item.quantity > 0)
         );
     };
 
@@ -503,14 +528,17 @@ export default function CashierScreen() {
             cart.reduce(
                 (total, item) =>
                     total +
-                    item.product.sellingPrice * item.quantity,
+                    getSaleUnitPrice(
+                        item.product,
+                        item.saleUnitType
+                    ) * item.quantity,
                 0
             ),
         [cart]
     );
 
     const cartVat = cartSubtotal * 0;
-    const cartTotal = cartSubtotal ;
+    const cartTotal = cartSubtotal;
 
     const parsedAmountPaid = parseFloat(amountPaid) || 0;
     const change = parsedAmountPaid - cartTotal;
@@ -556,8 +584,14 @@ export default function CashierScreen() {
                     productId: item.product.productId,
                     quantity: item.quantity,
                     productName: item.product.productName,
-                    unitPrice: item.product.sellingPrice,
-                    costPrice: item.product.costPrice,
+                    unitPrice: getSaleUnitPrice(
+                        item.product,
+                        item.saleUnitType
+                    ),
+                    costPrice: item.product.costPrice ?? undefined,
+                    saleUnitType: item.saleUnitType,
+                    unitsPerPackAtSale: item.unitsPerPackAtSale,
+                    stockQuantity: item.stockQuantity,
                 })),
             });
 
@@ -848,118 +882,120 @@ export default function CashierScreen() {
                                 </Text>
                             </View>
                         ) : (
-                            cart.map((item) => (
-                                <View
-                                    key={item.product.productId}
-                                    style={styles.cartItem}
-                                >
-                                    <View
-                                        style={styles.cartItemInfo}
-                                    >
-                                        <Text
-                                            style={
-                                                styles.cartItemName
-                                            }
-                                        >
-                                            {
-                                                item.product
-                                                    .productName
-                                            }
-                                        </Text>
-                                        <Text
-                                            style={
-                                                styles.cartItemPrice
-                                            }
-                                        >
-                                            $
-                                            {Number(
-                                                item.product
-                                                    .sellingPrice
-                                            ).toFixed(2)}{" "}
-                                            each
-                                        </Text>
-                                    </View>
+                            cart.map((item) => {
+                                const lineKey = `${item.product.productId}::${item.saleUnitType}`;
+                                const unitPrice = getSaleUnitPrice(
+                                    item.product,
+                                    item.saleUnitType
+                                );
+                                const lineTotal = unitPrice * item.quantity;
+                                const unitLabel =
+                                    item.saleUnitType === "Pack"
+                                        ? "pack"
+                                        : "each";
 
+                                return (
                                     <View
-                                        style={
-                                            styles.quantityControls
-                                        }
+                                        key={lineKey}
+                                        style={styles.cartItem}
                                     >
+                                        <View
+                                            style={styles.cartItemInfo}
+                                        >
+                                            <Text
+                                                style={styles.cartItemName}
+                                            >
+                                                {item.product.productName}
+                                            </Text>
+                                            <Text
+                                                style={styles.cartItemPrice}
+                                            >
+                                                ${unitPrice.toFixed(2)}{" "}
+                                                / {unitLabel}
+                                                {item.saleUnitType ===
+                                                    "Pack" &&
+                                                item.unitsPerPackAtSale >
+                                                    1
+                                                    ? ` (${item.unitsPerPackAtSale} units)`
+                                                    : ""}
+                                            </Text>
+                                        </View>
+
+                                        <View
+                                            style={styles.quantityControls}
+                                        >
+                                            <Pressable
+                                                onPress={() =>
+                                                    decreaseQuantity(
+                                                        item.product
+                                                            .productId,
+                                                        item.saleUnitType
+                                                    )
+                                                }
+                                                style={
+                                                    styles.quantityButton
+                                                }
+                                            >
+                                                <Text
+                                                    style={
+                                                        styles.quantityButtonText
+                                                    }
+                                                >
+                                                    −
+                                                </Text>
+                                            </Pressable>
+
+                                            <Text
+                                                style={styles.quantityText}
+                                            >
+                                                {item.quantity}
+                                            </Text>
+
+                                            <Pressable
+                                                onPress={() =>
+                                                    increaseQuantity(
+                                                        item.product
+                                                            .productId,
+                                                        item.saleUnitType
+                                                    )
+                                                }
+                                                style={
+                                                    styles.quantityButton
+                                                }
+                                            >
+                                                <Text
+                                                    style={
+                                                        styles.quantityButtonText
+                                                    }
+                                                >
+                                                    +
+                                                </Text>
+                                            </Pressable>
+                                        </View>
+
+                                        <Text
+                                            style={styles.cartItemTotal}
+                                        >
+                                            ${lineTotal.toFixed(2)}
+                                        </Text>
+
                                         <Pressable
                                             onPress={() =>
-                                                decreaseQuantity(
-                                                    item.product
-                                                        .productId
+                                                removeFromCart(
+                                                    item.product.productId,
+                                                    item.saleUnitType
                                                 )
-                                            }
-                                            style={
-                                                styles.quantityButton
                                             }
                                         >
                                             <Text
-                                                style={
-                                                    styles.quantityButtonText
-                                                }
+                                                style={styles.removeText}
                                             >
-                                                −
-                                            </Text>
-                                        </Pressable>
-
-                                        <Text
-                                            style={
-                                                styles.quantityText
-                                            }
-                                        >
-                                            {item.quantity}
-                                        </Text>
-
-                                        <Pressable
-                                            onPress={() =>
-                                                increaseQuantity(
-                                                    item.product
-                                                        .productId
-                                                )
-                                            }
-                                            style={
-                                                styles.quantityButton
-                                            }
-                                        >
-                                            <Text
-                                                style={
-                                                    styles.quantityButtonText
-                                                }
-                                            >
-                                                +
+                                                ×
                                             </Text>
                                         </Pressable>
                                     </View>
-
-                                    <Text
-                                        style={styles.cartItemTotal}
-                                    >
-                                        $
-                                        {(
-                                            item.product
-                                                .sellingPrice *
-                                            item.quantity
-                                        ).toFixed(2)}
-                                    </Text>
-
-                                    <Pressable
-                                        onPress={() =>
-                                            removeFromCart(
-                                                item.product.productId
-                                            )
-                                        }
-                                    >
-                                        <Text
-                                            style={styles.removeText}
-                                        >
-                                            ×
-                                        </Text>
-                                    </Pressable>
-                                </View>
-                            ))
+                                );
+                            })
                         )}
 
                         {cart.length > 0 && (
@@ -971,43 +1007,31 @@ export default function CashierScreen() {
                                 }}
                             >
                                 <View style={styles.totalRow}>
-                                    <Text
-                                        style={styles.totalLabel}
-                                    >
+                                    <Text style={styles.totalLabel}>
                                         SUBTOTAL
                                     </Text>
 
-                                    <Text
-                                        style={styles.totalValue}
-                                    >
+                                    <Text style={styles.totalValue}>
                                         ${cartSubtotal.toFixed(2)}
                                     </Text>
                                 </View>
 
                                 <View style={styles.totalRow}>
-                                    <Text
-                                        style={styles.totalLabel}
-                                    >
-                                       
+                                    <Text style={styles.totalLabel}>
+                                        VAT
                                     </Text>
 
-                                    <Text
-                                        style={styles.totalValue}
-                                    >
-                                       
+                                    <Text style={styles.totalValue}>
+                                        ${cartVat.toFixed(2)}
                                     </Text>
                                 </View>
 
                                 <View style={styles.totalRow}>
-                                    <Text
-                                        style={styles.totalLabel}
-                                    >
+                                    <Text style={styles.totalLabel}>
                                         TOTAL
                                     </Text>
 
-                                    <Text
-                                        style={styles.totalValue}
-                                    >
+                                    <Text style={styles.totalValue}>
                                         ${cartTotal.toFixed(2)}
                                     </Text>
                                 </View>
@@ -1024,9 +1048,7 @@ export default function CashierScreen() {
                                     Payment Method
                                 </Text>
 
-                                <View
-                                    style={styles.paymentMethods}
-                                >
+                                <View style={styles.paymentMethods}>
                                     {[
                                         "Cash",
                                         "Card",
@@ -1077,9 +1099,7 @@ export default function CashierScreen() {
                                 {parsedAmountPaid > 0 && (
                                     <View style={styles.changeRow}>
                                         <Text
-                                            style={
-                                                styles.changeLabel
-                                            }
+                                            style={styles.changeLabel}
                                         >
                                             Change
                                         </Text>
@@ -1122,54 +1142,31 @@ export default function CashierScreen() {
 
                     <Pressable
                         style={styles.printerButton}
-                        onPress={handleTestPrinter}
-                        disabled={printingTest}
+                        onPress={() => router.push("/cashier/printer")}
                     >
                         <View
-                            style={
-                                styles.printerButtonIconContainer
-                            }
+                            style={styles.printerButtonIconContainer}
                         >
-                            <Text
-                                style={styles.printerButtonIcon}
-                            >
+                            <Text style={styles.printerButtonIcon}>
                                 🖨️
                             </Text>
                         </View>
 
-                        <View
-                            style={styles.printerButtonContent}
-                        >
-                            <Text
-                                style={styles.printerButtonTitle}
-                            >
-                                {printingTest
-                                    ? "Testing Printer..."
-                                    : "Test Receipt Printer"}
+                        <View style={styles.printerButtonContent}>
+                            <Text style={styles.printerButtonTitle}>
+                                Receipt Printer
                             </Text>
 
                             <Text
-                                style={
-                                    styles.printerButtonSubtitle
-                                }
+                                style={styles.printerButtonSubtitle}
                             >
-                                {printerConnected
-                                    ? "RK-E260L • Connected"
-                                    : "Connect to printer001-a3d3"}
+                                Manage your receipt printer
                             </Text>
                         </View>
 
-                        {printingTest ? (
-                            <ActivityIndicator />
-                        ) : (
-                            <Text
-                                style={
-                                    styles.printerButtonArrow
-                                }
-                            >
-                                →
-                            </Text>
-                        )}
+                        <Text style={styles.printerButtonArrow}>
+                            →
+                        </Text>
                     </Pressable>
 
                     {/* My Sales */}
@@ -1240,10 +1237,13 @@ export default function CashierScreen() {
                                     }
                                 >
                                     $
-                                    {Number(
-                                        selectedProduct.sellingPrice
+                                    {getSaleUnitPrice(
+                                        selectedProduct,
+                                        selectedSaleUnitType
                                     ).toFixed(2)}{" "}
-                                    each
+                                    {selectedSaleUnitType === "Pack"
+                                        ? "per pack"
+                                        : "each"}
                                 </Text>
                                 <Text style={styles.stockText}>
                                     Available:{" "}
@@ -1314,8 +1314,9 @@ export default function CashierScreen() {
                                 >
                                     Total: $
                                     {(
-                                        Number(
-                                            selectedProduct.sellingPrice
+                                        getSaleUnitPrice(
+                                            selectedProduct,
+                                            selectedSaleUnitType
                                         ) *
                                         (Number(quantityInput) || 0)
                                     ).toFixed(2)}

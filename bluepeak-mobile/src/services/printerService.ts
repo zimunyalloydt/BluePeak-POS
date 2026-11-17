@@ -5,6 +5,11 @@ import {
 } from "react-native";
 import { getUser } from "../storage/authStorage";
 import { API_BASE_URL } from "../config/api";
+import {
+  saveSelectedPrinter,
+  getSelectedPrinter as getSavedSelectedPrinter,
+  clearSelectedPrinter,
+} from "../storage/printerStorage";
 
 /* ============================================================
    TYPES
@@ -97,7 +102,6 @@ interface BluetoothEscposPrinterNative {
    CONFIG
 ============================================================ */
 
-export const PRINTER_NAME = "printer001-a3d3";
 
 /** 80mm receipt width in normal-font characters. */
 const RECEIPT_WIDTH = 48;
@@ -340,143 +344,260 @@ export const printerService = {
   async scanDevices(): Promise<PrinterResult> {
     const { manager } = await ensureReady();
 
-    console.log("🔍 Scanning Bluetooth devices...");
+    console.log("Scanning Bluetooth devices...");
+
     const parsed = parseScanResult(await manager.scanDevices());
 
-    console.log("🔍 Paired Bluetooth devices:", parsed.paired);
-    console.log("🔍 Found Bluetooth devices:", parsed.found);
+    const paired = parsed.paired ?? [];
+    const found = parsed.found ?? [];
 
-    return parsed;
+    // Remove duplicate devices using their Bluetooth addresses.
+    const uniqueDevices = new Map<string, PrinterDevice>();
+
+    [...paired, ...found].forEach((device) => {
+      if (device.address) {
+        uniqueDevices.set(device.address.toLowerCase(), device);
+      }
+    });
+
+    const devices = Array.from(uniqueDevices.values());
+
+    console.log("Available Bluetooth devices:", devices);
+
+    return {
+      paired: devices.filter((device) =>
+        paired.some(
+          (item) =>
+            item.address?.toLowerCase() ===
+            device.address?.toLowerCase()
+        )
+      ),
+      found: devices.filter(
+        (device) =>
+          !paired.some(
+            (item) =>
+              item.address?.toLowerCase() ===
+              device.address?.toLowerCase()
+          )
+      ),
+    };
   },
 
-  async findPrinter(): Promise<PrinterDevice | null> {
-    const result = await this.scanDevices();
-    const devices = [...(result.paired ?? []), ...(result.found ?? [])];
+  async getSelectedPrinter(): Promise<PrinterDevice | null> {
+    const saved = await getSavedSelectedPrinter();
 
-    console.log("🖨️ Bluetooth devices:", devices);
+    if (!saved) return null;
 
-    const printer = devices.find(
-      (d) => d.name?.toLowerCase() === PRINTER_NAME.toLowerCase()
-    );
+    return {
+      name: saved.name,
+      address: saved.address,
+    };
+  },
 
-    if (printer) {
-      console.log("✅ BluePeak printer found:", printer);
-    } else {
-      console.log(`❌ Printer "${PRINTER_NAME}" was not found.`);
+  async selectPrinter(device: PrinterDevice): Promise<PrinterDevice> {
+    if (!device.name || !device.address) {
+      throw new Error("Invalid printer selection.");
     }
 
-    return printer ?? null;
+    const { manager } = await ensureReady();
+
+    console.log(
+      `Selecting printer: ${device.name} (${device.address})`
+    );
+
+    // Disconnect an existing connection if it belongs to another device.
+    const currentAddress =
+      await manager.getConnectedDeviceAddress();
+
+    if (
+      currentAddress &&
+      currentAddress.toLowerCase() !== device.address.toLowerCase()
+    ) {
+      await manager.disconnect(currentAddress);
+    }
+
+    // Persist the selection so it survives application restarts.
+    await saveSelectedPrinter({
+      name: device.name,
+      address: device.address,
+    });
+
+    // Connect to the selected printer.
+    await manager.connect(device.address);
+
+    console.log(`Connected to ${device.name}`);
+
+    return {
+      ...device,
+      connected: true,
+    };
   },
 
   async connect(): Promise<PrinterDevice> {
     const { manager } = await ensureReady();
 
-    const printer = await this.findPrinter();
-    if (!printer) {
+    const selected = await getSavedSelectedPrinter();
+
+    if (!selected) {
       throw new Error(
-        `Printer "${PRINTER_NAME}" was not found. ` +
-          "Make sure the printer is switched on and paired with the phone."
+        "No printer selected. Scan for printers and select one first."
       );
     }
 
     console.log(
-      `🔗 Connecting to ${printer.name} (${printer.address})...`
+      `Connecting to ${selected.name} (${selected.address})...`
     );
-    await manager.connect(printer.address);
-    console.log("✅ Printer connected.");
 
-    return printer;
+    await manager.connect(selected.address);
+
+    console.log(`Connected to ${selected.name}`);
+
+    return {
+      ...selected,
+      connected: true,
+    };
   },
 
   async isConnected(): Promise<boolean> {
     const { manager } = await ensureReady();
-    const connected = await manager.isDeviceConnected();
-    console.log("🖨️ Printer connected:", connected);
-    return connected;
+
+    return manager.isDeviceConnected();
   },
 
   async getConnectedPrinter(): Promise<PrinterDevice | null> {
     const { manager } = await ensureReady();
+
     return manager.getConnectedDevice();
   },
 
   async disconnect(): Promise<void> {
     const { manager } = await ensureReady();
+
     const address = await manager.getConnectedDeviceAddress();
 
     if (!address) return;
 
-    console.log(`🔌 Disconnecting printer ${address}...`);
+    console.log(`Disconnecting printer ${address}...`);
+
     await manager.disconnect(address);
-    console.log("✅ Printer disconnected.");
   },
 
-  /** Connect if not already connected, and return the printer handle. */
+  async forgetSelectedPrinter(): Promise<void> {
+    await this.disconnect();
+    await clearSelectedPrinter();
+
+    console.log("Selected printer forgotten.");
+  },
+
+  /**
+   * Connect to the saved printer if it is not already connected.
+   */
   async ensureConnected(): Promise<{
     printer: BluetoothEscposPrinterNative;
     device: PrinterDevice;
   }> {
-    const { printer } = await ensureReady();
+    const { printer, manager } = await ensureReady();
 
-    if (!(await this.isConnected())) {
-      console.log("🔗 Printer is not connected. Connecting...");
-      await this.connect();
+    let connected = await manager.isDeviceConnected();
+
+    let device = connected
+      ? await manager.getConnectedDevice()
+      : null;
+
+    const selected = await getSavedSelectedPrinter();
+
+    if (!selected) {
+      throw new Error(
+        "No printer selected. Open printer settings and select a printer."
+      );
     }
 
-    const device = (await this.getConnectedPrinter()) ?? {
-      name: PRINTER_NAME,
-      address: "",
+    // If a different printer is connected, switch to the saved selection.
+    const currentAddress =
+      await manager.getConnectedDeviceAddress();
+
+    if (
+      connected &&
+      currentAddress &&
+      currentAddress.toLowerCase() !==
+        selected.address.toLowerCase()
+    ) {
+      await manager.disconnect(currentAddress);
+      connected = false;
+      device = null;
+    }
+
+    if (!connected) {
+      console.log(`Reconnecting to ${selected.name}...`);
+
+      await manager.connect(selected.address);
+      connected = true;
+    }
+
+    device = (await manager.getConnectedDevice()) ?? {
+      name: selected.name,
+      address: selected.address,
       connected: true,
     };
 
-    return { printer, device };
+    return {
+      printer,
+      device: {
+        ...device,
+        connected: true,
+      },
+    };
   },
 
   /* ---------- Test print ---------- */
 
   async testPrint(): Promise<void> {
-    const { printer } = await this.ensureConnected();
+    const { printer, device } = await this.ensureConnected();
 
-    console.log("🖨️ Starting printer test...");
+    console.log(`Testing printer: ${device.name}`);
 
     await printer.printerInit();
 
     await printer.printerAlign(1);
+
     await printer.printText("BLUEPEAK POS\n", {
       widthtimes: 2,
       heigthtimes: 2,
     });
+
     await printer.printText("PRINTER TEST\n\n", {});
 
     await printer.printerAlign(0);
+
     await printer.printText(LINE, {});
-    await printer.printText("Printer: RK-E260L\n", {});
-    await printer.printText(`Bluetooth: ${PRINTER_NAME}\n`, {});
+    await printer.printText(`Printer: ${device.name}\n`, {});
+    await printer.printText(`Bluetooth: ${device.address}\n`, {});
     await printer.printText("Status: Connected\n", {});
     await printer.printText(LINE, {});
 
     await printer.printerAlign(1);
-    await printer.printText("Bluetooth printing works!\n\n", {});
 
-    /**
-     * Feed past the print head so the cutter can reach
-     * the blank section. RK-E260L cutter is ~10–15mm below
-     * the print head. Plain \n, never \n\r.
-     */
+    await printer.printText(
+      "Bluetooth printing works!\n\n",
+      {}
+    );
+
+    // Feed paper before attempting to cut.
     await printer.printText("\n".repeat(15), {});
 
     await new Promise((resolve) => setTimeout(resolve, 2000));
 
     try {
       await printer.cutPaper();
-      console.log("✂️ Test paper cut successfully.");
+      console.log("Paper cut successfully.");
     } catch (error) {
-      console.log("⚠️ Paper cutter not available:", error);
+      console.log("Paper cutter not available:", error);
     }
 
-    console.log("✅ Printer test completed.");
+    console.log("Printer test completed.");
   },
 
+  /* ---------- Receipt ---------- */
   /* ---------- Receipt ---------- */
 
   async printReceipt(receipt: Receipt): Promise<void> {

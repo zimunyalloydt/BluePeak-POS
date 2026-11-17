@@ -11,8 +11,8 @@ export interface Product {
     productName: string;
     barcode?: string;
     sellingPrice: number;
-    costPrice: number;
-    profit: number;
+    costPrice: number | null;
+    profit: number | null;
     quantityInStock?: number;
     isActive?: boolean;
     imageUrl?: string | null;
