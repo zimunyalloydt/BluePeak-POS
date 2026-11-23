@@ -599,217 +599,227 @@ export const printerService = {
 
   /* ---------- Receipt ---------- */
   /* ---------- Receipt ---------- */
-
-  async printReceipt(receipt: Receipt): Promise<void> {
-    console.log("🧾 Printing receipt:", receipt.saleId);
-    console.log(
-      "🧾 Receipt payload:",
-      JSON.stringify(
-        {
-          saleId: receipt.saleId,
-          saleDate: receipt.saleDate,
-          customerName: receipt.customerName,
-          cashier: receipt.cashier,
-        },
-        null,
-        2
-      )
-    );
+async printReceipt(receipt: Receipt): Promise<void> {
+    console.log("Printing receipt:", receipt.saleId);
 
     const { printer } = await this.ensureConnected();
 
     await printer.printerInit();
 
-    /* ----- HEADER ----- */
+    const cachedUser = await getUser();
 
-/* ----- ORGANISATION HEADER ----- */
+    const organisationName =
+        receipt.organisationName?.trim() ||
+        cachedUser?.organisationName?.trim() ||
+        "COLDSTONE TRADING";
 
-const cachedUser = await getUser();
+    const organisationAddress =
+        receipt.organisationAddress?.trim() ||
+        cachedUser?.organisationAddress?.trim() ||
+        "";
 
-const organisationName =
-    receipt.organisationName?.trim() ||
-    cachedUser?.organisationName?.trim() ||
-    "";
+    const organisationPhone =
+        receipt.organisationPhoneNumber?.trim() ||
+        cachedUser?.organisationPhoneNumber?.trim() ||
+        "";
 
-const organisationAddress =
-    receipt.organisationAddress?.trim() ||
-    cachedUser?.organisationAddress?.trim() ||
-    "";
+    const width = RECEIPT_WIDTH;
 
-const organisationPhone =
-    receipt.organisationPhoneNumber?.trim() ||
-    cachedUser?.organisationPhoneNumber?.trim() ||
-    "";
+    const line = "-".repeat(width) + "\n";
 
-const organisationEmail =
-    receipt.organisationEmail?.trim() ||
-    cachedUser?.organisationEmail?.trim() ||
-    "";
+    const money = (value: number) =>
+        formatMoney(value);
 
-console.log("Printing receipt for organisation:", {
-    organisationId: cachedUser?.organisationId,
-    organisationName,
-    organisationAddress,
-    organisationPhone,
-    organisationEmail
-});
+    const rightAlign = (value: string) =>
+        value.padStart(width);
 
-await printer.printerAlign(1);
+    const amountLine = (label: string, value: number) => {
+        const amount = `$ ${money(value)}`;
 
-if (organisationName) {
-    await printer.printText(`${organisationName}\n`, {
-        widthtimes: 2,
-        heigthtimes: 1,
-    });
-}
+        return (
+            label +
+            amount.padStart(Math.max(1, width - label.length)) +
+            "\n"
+        );
+    };
 
-await printer.printText("\n", {});
+    const wrapText = (value: string, maxWidth: number) => {
+        const words = value.split(/\s+/);
+        const lines: string[] = [];
+        let current = "";
 
-/* ----- STORE / INVOICE ----- */
+        for (const word of words) {
+            if (!word) continue;
 
-await printer.printerAlign(0);
+            if ((current + " " + word).trim().length > maxWidth) {
+                if (current) lines.push(current);
+                current = word;
+            } else {
+                current = (current + " " + word).trim();
+            }
+        }
 
-if (organisationAddress) {
+        if (current) lines.push(current);
+
+        return lines;
+    };
+
+    /* =========================
+       BUSINESS HEADER
+    ========================= */
+
+    await printer.printerAlign(0);
+
     await printer.printText(
-        `ADDRESS : ${organisationAddress}\n`,
-        {}
+        `${organisationName.toUpperCase()}\n`,
+        { widthtimes: 1, heigthtimes: 1 }
     );
-}
 
-if (organisationPhone) {
-    await printer.printText(
-        `CONTACT : ${organisationPhone}\n`,
-        {}
-    );
-}
+    if (organisationAddress) {
+        const addressLines = wrapText(
+            organisationAddress,
+            width
+        );
 
-if (organisationEmail) {
-    await printer.printText(
-        `EMAIL : ${organisationEmail}\n`,
-        {}
-    );
-}
-
-    await printer.printText(`Invoice: ${receipt.saleId}\n`, {});
-    await printer.printText(
-      `${formatReceiptDate(receipt.saleDate)}\n`,
-      {}
-    );
-    await printer.printText(LINE, {});
-
-    /* ----- CUSTOMER DETAILS ----- */
-    // Defensive: only accept a real string. If it's an object like
-    // { name: "John" }, unwrap it. Otherwise fall back to walk-in.
-    const rawCustomer: unknown = receipt.customerName;
-
-    let customerName = "";
-    if (typeof rawCustomer === "string") {
-      customerName = rawCustomer.trim();
-    } else if (
-      rawCustomer &&
-      typeof rawCustomer === "object" &&
-      "name" in rawCustomer &&
-      typeof (rawCustomer as { name?: unknown }).name === "string"
-    ) {
-      customerName = ((rawCustomer as { name: string }).name ?? "").trim();
+        for (const address of addressLines) {
+            await printer.printText(`${address}\n`, {});
+        }
     }
 
-    console.log(
-      "🧾 Raw customerName:",
-      JSON.stringify(rawCustomer),
-      "→ resolved:",
-      JSON.stringify(customerName)
-    );
+    if (organisationPhone) {
+        await printer.printText(
+            `Cell: ${organisationPhone}\n`,
+            {}
+        );
+    }
+
+    /* =========================
+       DATE AND TIME
+    ========================= */
+
+    const formattedDate = formatReceiptDate(receipt.saleDate);
+
+    const dateParts = formattedDate.split(" ");
+
+    const date = dateParts[0] || "";
+    const time = dateParts[1] || "";
+
+    await printer.printText("\n", {});
+
+    await printer.printerAlign(2);
+
+    await printer.printText(`${date}\n`, {});
+    await printer.printText(`${time}\n`, {});
+
+    /* =========================
+       INVOICE NUMBER
+    ========================= */
+
+    await printer.printerAlign(0);
 
     await printer.printText(
-      `Customer: ${customerName || "Walk-in Customer"}\n`,
-      {}
+        `INVOICE: ${receipt.saleId}\n`,
+        {}
     );
 
-    await printer.printText(LINE, {});
+    await printer.printText(line, {});
 
-    /* ----- ITEMS TABLE ----- */
-    await printer.printText(itemHeader(), {});
-    await printer.printText(LINE, {});
+    /* =========================
+       ITEMS
+    ========================= */
 
     for (const item of receipt.items) {
-      await printer.printText(
-        itemRow(
-          item.productName,
-          item.unitPrice,
-          item.quantity,
-          item.total
-        ),
-        {}
-      );
+        const quantity = formatNumber(item.quantity);
+
+        const productName = item.productName || "Unknown Product";
+
+        const itemDescription =
+            `${quantity} x ${productName}`;
+
+        const itemAmount = money(item.total);
+
+        const availableNameWidth =
+            width - itemAmount.length - 1;
+
+        const descriptionLines = wrapText(
+            itemDescription,
+            availableNameWidth
+        );
+
+        for (let index = 0; index < descriptionLines.length; index++) {
+            if (index === 0) {
+                const description =
+                    descriptionLines[index];
+
+                await printer.printText(
+                    description.padEnd(availableNameWidth) +
+                    itemAmount +
+                    "\n",
+                    {}
+                );
+            } else {
+                await printer.printText(
+                    `${descriptionLines[index]}\n`,
+                    {}
+                );
+            }
+        }
     }
 
-    await printer.printText(LINE, {});
+    await printer.printText("\n", {});
 
-    /* ----- GROSS TOTAL ----- */
-    const totalQuantity = receipt.items.reduce(
-      (sum, item) => sum + Number(item.quantity || 0),
-      0
+    /* =========================
+       PAYMENT SUMMARY
+    ========================= */
+
+    await printer.printText(
+        amountLine("Total $", receipt.total),
+        {}
     );
 
     await printer.printText(
-      "Gross Total:".padStart(35) +
-        String(totalQuantity).padStart(5) +
-        " " +
-        formatMoney(receipt.subtotal).padStart(7) +
-        "\n",
-      {}
+        amountLine("USD Paid $", receipt.amountPaid),
+        {}
     );
-    await printer.printText(LINE, {});
 
-    /* ----- TOTALS ----- */
-    await printer.printText(amountLine("Net Total:", receipt.total), {});
-    await printer.printText(amountLine("USD paid:", receipt.amountPaid), {});
+    await printer.printText(
+        amountLine("Change $", receipt.changeGiven),
+        {}
+    );
 
-    if (receipt.changeGiven >= 0) {
-      await printer.printText(
-        amountLine("Balance:", receipt.changeGiven),
+    /* =========================
+       CASHIER
+    ========================= */
+
+    await printer.printText("\n", {});
+
+    await printer.printerAlign(1);
+
+    await printer.printText(
+        `You were served by ${receipt.cashier || "Staff"}\n`,
         {}
-      );
-    } else {
-      await printer.printText(
-        amountLine("Balance Due:", Math.abs(receipt.changeGiven)),
+    );
+
+    /* =========================
+       FOOTER
+    ========================= */
+
+    await printer.printText(
+        "God bless you\n\n\n",
         {}
-      );
+    );
+
+    await printer.printerAlign(0);
+
+    // Feed paper before cutting.
+    await printer.printText("\n\n", {});
+
+    try {
+        await printer.cutPaper();
+    } catch (error) {
+        console.log("Paper cutter unavailable:", error);
     }
 
-/* ----- CASHIER ----- */
-await printer.printText(LINE, {});
-await printer.printText(`Sales Person: ${receipt.cashier}\n`, {});
-
-/* ----- RECEIPT VERIFICATION QR CODE ----- */
-await printer.printText(LINE, {});
-await printer.printerAlign(1);
-
-if (receipt.receiptToken) {
-  const serverRoot = API_BASE_URL.replace(/\/api\/?$/, "");
-
-  const verificationUrl =
-    `${serverRoot}/verify-receipt.html?token=${encodeURIComponent(
-      receipt.receiptToken
-    )}`;
-
-  console.log("🧾 Receipt verification URL:", verificationUrl);
-
-  await printer.printText("SCAN TO VERIFY RECEIPT\n", {});
-  await printer.printQRCode(verificationUrl, 6, 1);
-  await printer.printText("\n", {});
-} else {
-  console.warn(
-    "⚠️ Receipt has no verification token; QR code skipped."
-  );
+    console.log("Receipt printed successfully.");
+},
 }
-
-/* ----- FOOTER ----- */
-await printer.printText("Thank you for shopping with us\n", {});
-await printer.printText("Please come back soon\n\n", { cut: true });
-
-    console.log("✂️ Receipt printed and cutter command sent.");
-   console.log("✅ Receipt printed successfully.");
-  },
-};
