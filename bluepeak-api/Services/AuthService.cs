@@ -115,18 +115,24 @@ OrganisationLogoUrl = user.Organisation.LogoUrl
         return true;
     }
 
-    public async Task<OrganisationRegistrationResultDto>
-        RegisterOrganisationAsync(RegisterOrganisationDto request)
+public async Task<OrganisationRegistrationResultDto>
+    RegisterOrganisationAsync(RegisterOrganisationDto request)
+{
+    var organisationCode = request.OrganisationCode
+        .Trim()
+        .ToUpperInvariant();
+
+    var organisationName = request.OrganisationName.Trim();
+    var username = request.Username.Trim();
+    var adminEmail = request.AdminEmail.Trim();
+
+    var strategy = _context.Database.CreateExecutionStrategy();
+
+    return await strategy.ExecuteAsync(async () =>
     {
-        var organisationCode = request.OrganisationCode
-            .Trim()
-            .ToUpperInvariant();
-
-        var organisationName = request.OrganisationName.Trim();
-
-        var username = request.Username.Trim();
-
-        var adminEmail = request.AdminEmail.Trim();
+        // This DbContext is scoped to the registration request.
+        // Clear tracking state before each execution attempt.
+        _context.ChangeTracker.Clear();
 
         if (await _context.Organisations.AnyAsync(
                 o => o.OrganisationCode == organisationCode))
@@ -165,7 +171,6 @@ OrganisationLogoUrl = user.Organisation.LogoUrl
 
             _context.Organisations.Add(organisation);
 
-            // Save to obtain the generated OrganisationId.
             await _context.SaveChangesAsync();
 
             var admin = new User
@@ -183,15 +188,15 @@ OrganisationLogoUrl = user.Organisation.LogoUrl
                 CreatedAt = DateTime.UtcNow
             };
 
-        
             _context.Users.Add(admin);
-            // Save to obtain the administrator's generated UserId.
+
             await _context.SaveChangesAsync();
-            // Assign all predefined permissions to the new organisation's
-            // administrator. Existing users are not modified.
+
+            // Assign all predefined permissions to the administrator.
             var permissionIds = await _context.Permissions
                 .Select(p => p.PermissionId)
                 .ToListAsync();
+
             foreach (var permissionId in permissionIds)
             {
                 _context.UserPermissions.Add(new UserPermission
@@ -200,9 +205,10 @@ OrganisationLogoUrl = user.Organisation.LogoUrl
                     PermissionId = permissionId
                 });
             }
-            await _context.SaveChangesAsync();
-            await transaction.CommitAsync();
 
+            await _context.SaveChangesAsync();
+
+            await transaction.CommitAsync();
 
             return new OrganisationRegistrationResultDto
             {
@@ -219,8 +225,6 @@ OrganisationLogoUrl = user.Organisation.LogoUrl
         {
             await transaction.RollbackAsync();
 
-            // The unique database index also protects against
-            // simultaneous registration attempts using the same code.
             var codeExists = await _context.Organisations
                 .AsNoTracking()
                 .AnyAsync(o => o.OrganisationCode == organisationCode);
@@ -242,5 +246,6 @@ OrganisationLogoUrl = user.Organisation.LogoUrl
             await transaction.RollbackAsync();
             throw;
         }
-    }
+    });
+}
 }
