@@ -16,14 +16,21 @@ using bluepeak_api.Services.Implementations;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Database
 builder.Services.AddDbContext<AppDbContext>(options =>
 {
-    var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+    var connectionString = builder.Configuration
+        .GetConnectionString("DefaultConnection")
+        ?? throw new InvalidOperationException(
+            "Database connection string is missing.");
 
     options.UseMySql(
         connectionString,
-        ServerVersion.AutoDetect(connectionString));
+        new MySqlServerVersion(new Version(8, 0, 11)),
+        mysqlOptions =>
+        {
+            mysqlOptions.EnableRetryOnFailure();
+        }
+    );
 });
 
 // Controllers
