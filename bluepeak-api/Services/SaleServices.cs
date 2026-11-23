@@ -22,55 +22,65 @@ public class SaleService : ISaleService
         _organisationContext = organisationContext;
     }
 
-    public async Task<int> ProcessSaleAsync(
-        CreateSaleDto dto,
-        int userId)
+public async Task<int> ProcessSaleAsync(
+    CreateSaleDto dto,
+    int userId)
+{
+    int organisationId = _organisationContext.OrganisationId;
+
+    // Validate cashier.
+    var user = await _context.Users
+        .Include(u => u.Role)
+        .FirstOrDefaultAsync(u =>
+            u.UserId == userId &&
+            u.OrganisationId == organisationId &&
+            u.IsActive);
+
+    if (user == null)
     {
-        // The organisation comes from the authenticated user's token.
-        // Never trust an organisation ID supplied by the mobile app.
-        int organisationId = _organisationContext.OrganisationId;
+        throw new UnauthorizedAccessException(
+            "Your account is inactive or does not belong to this organisation.");
+    }
 
-        // Verify that the cashier belongs to this organisation.
-        var user = await _context.Users
-            .Include(u => u.Role)
-            .FirstOrDefaultAsync(u =>
-                u.UserId == userId &&
-                u.OrganisationId == organisationId &&
-                u.IsActive);
+    // Validate selling permission.
+    bool isAdmin = user.Role?.RoleName == "Admin";
 
-        if (user == null)
+    if (!isAdmin)
+    {
+        bool hasPermission = await _context.UserPermissions
+            .Include(up => up.Permission)
+            .AnyAsync(up =>
+                up.UserId == userId &&
+                up.Permission.Name == "Sell Products");
+
+        if (!hasPermission)
         {
             throw new UnauthorizedAccessException(
-                "Your account is inactive or does not belong to this organisation.");
+                "You do not have permission to sell products.");
         }
+    }
 
-        // Check the cashier's selling permission.
-        bool isAdmin = user.Role?.RoleName == "Admin";
+    if (string.IsNullOrWhiteSpace(dto.ClientSaleId))
+    {
+        throw new ArgumentException("ClientSaleId is required.");
+    }
 
-        if (!isAdmin)
-        {
-            bool hasPermission = await _context.UserPermissions
-                .Include(up => up.Permission)
-                .AnyAsync(up =>
-                    up.UserId == userId &&
-                    up.Permission.Name == "Sell Products");
+    string clientSaleId = dto.ClientSaleId.Trim();
 
-            if (!hasPermission)
-            {
-                throw new UnauthorizedAccessException(
-                    "You do not have permission to sell products.");
-            }
-        }
+    if (dto.Items == null || dto.Items.Count == 0)
+    {
+        throw new ArgumentException(
+            "A sale must contain at least one item.");
+    }
 
-        // Preserve offline retry protection within the organisation.
-        if (string.IsNullOrWhiteSpace(dto.ClientSaleId))
-        {
-            throw new ArgumentException(
-                "ClientSaleId is required.");
-        }
+    var strategy = _context.Database.CreateExecutionStrategy();
 
-        var clientSaleId = dto.ClientSaleId.Trim();
+    return await strategy.ExecuteAsync(async () =>
+    {
+        // Ensure each retry starts with a clean change tracker.
+        _context.ChangeTracker.Clear();
 
+        // Check duplicate sale inside the execution strategy.
         var existingSale = await _context.Sales
             .FirstOrDefaultAsync(s =>
                 s.OrganisationId == organisationId &&
@@ -81,171 +91,157 @@ public class SaleService : ISaleService
             return existingSale.SaleId;
         }
 
-        if (dto.Items == null || dto.Items.Count == 0)
-        {
-            throw new ArgumentException(
-                "A sale must contain at least one item.");
-        }
-
-        using var transaction =
+        await using var transaction =
             await _context.Database.BeginTransactionAsync();
 
-        decimal subtotal = 0m;
-
-        var receiptToken = string.IsNullOrWhiteSpace(dto.ReceiptToken)
-            ? Guid.NewGuid().ToString("N")
-            : dto.ReceiptToken.Trim();
-
-        var sale = new Sale
+        try
         {
-            ClientSaleId = clientSaleId,
-            ReceiptToken = receiptToken,
-            OrganisationId = organisationId,
-            UserId = userId,
-            CustomerName = dto.CustomerName,
-            PaymentMethod = dto.PaymentMethod,
-            AmountPaid = dto.AmountPaid,
-            SaleDate = DateTime.UtcNow
-        };
+            decimal subtotal = 0m;
 
-       foreach (var item in dto.Items)
-{
-    if (item.Quantity <= 0)
-    {
-        throw new ArgumentException(
-            "Sale quantities must be greater than zero.");
-    }
+            var receiptToken = string.IsNullOrWhiteSpace(dto.ReceiptToken)
+                ? Guid.NewGuid().ToString("N")
+                : dto.ReceiptToken.Trim();
 
-    // Only retrieve products owned by this organisation.
-    var product = await _context.Products
-        .FirstOrDefaultAsync(p =>
-            p.ProductId == item.ProductId &&
-            p.OrganisationId == organisationId &&
-            p.IsActive);
+            var sale = new Sale
+            {
+                ClientSaleId = clientSaleId,
+                ReceiptToken = receiptToken,
+                OrganisationId = organisationId,
+                UserId = userId,
+                CustomerName = dto.CustomerName,
+                PaymentMethod = dto.PaymentMethod,
+                AmountPaid = dto.AmountPaid,
+                SaleDate = DateTime.UtcNow
+            };
 
-    if (product == null)
-    {
-        throw new InvalidOperationException(
-            $"Product {item.ProductId} was not found, is inactive, " +
-            "or does not belong to your organisation.");
-    }
+            foreach (var item in dto.Items)
+            {
+                if (item.Quantity <= 0)
+                {
+                    throw new ArgumentException(
+                        "Sale quantities must be greater than zero.");
+                }
 
-    // Validate the requested sale unit type.
-    var saleUnitType = item.SaleUnitType?.Trim();
+                var product = await _context.Products
+                    .FirstOrDefaultAsync(p =>
+                        p.ProductId == item.ProductId &&
+                        p.OrganisationId == organisationId &&
+                        p.IsActive);
 
-    if (string.Equals(
-        saleUnitType,
-        "Pack",
-        StringComparison.OrdinalIgnoreCase))
-    {
-        saleUnitType = "Pack";
-    }
-    else if (string.Equals(
-        saleUnitType,
-        "SingleUnit",
-        StringComparison.OrdinalIgnoreCase))
-    {
-        saleUnitType = "SingleUnit";
-    }
-    else
-    {
-        throw new ArgumentException(
-            "SaleUnitType must be SingleUnit or Pack.");
-    }
+                if (product == null)
+                {
+                    throw new InvalidOperationException(
+                        $"Product {item.ProductId} was not found, is inactive, " +
+                        "or does not belong to your organisation.");
+                }
 
-    int stockQuantity;
-    int unitsPerPackAtSale;
-    decimal unitPrice;
+                var saleUnitType = item.SaleUnitType?.Trim();
 
-    if (saleUnitType == "Pack")
-    {
-        if (product.StockType != "Pack")
-        {
-            throw new InvalidOperationException(
-                $"{product.ProductName} is not configured for pack sales.");
+                if (string.Equals(
+                    saleUnitType,
+                    "Pack",
+                    StringComparison.OrdinalIgnoreCase))
+                {
+                    saleUnitType = "Pack";
+                }
+                else if (string.Equals(
+                    saleUnitType,
+                    "SingleUnit",
+                    StringComparison.OrdinalIgnoreCase))
+                {
+                    saleUnitType = "SingleUnit";
+                }
+                else
+                {
+                    throw new ArgumentException(
+                        "SaleUnitType must be SingleUnit or Pack.");
+                }
+
+                int stockQuantity;
+                int unitsPerPackAtSale;
+                decimal unitPrice;
+
+                if (saleUnitType == "Pack")
+                {
+                    if (product.StockType != "Pack")
+                    {
+                        throw new InvalidOperationException(
+                            $"{product.ProductName} is not configured for pack sales.");
+                    }
+
+                    if (product.UnitsPerPack <= 0)
+                    {
+                        throw new InvalidOperationException(
+                            $"{product.ProductName} has an invalid pack configuration.");
+                    }
+
+                    if (!product.SellingPricePerPack.HasValue ||
+                        product.SellingPricePerPack.Value <= 0)
+                    {
+                        throw new InvalidOperationException(
+                            $"{product.ProductName} has an invalid pack selling price.");
+                    }
+
+                    stockQuantity = checked(
+                        item.Quantity * product.UnitsPerPack);
+
+                    unitsPerPackAtSale = product.UnitsPerPack;
+
+                    unitPrice = product.SellingPricePerPack.Value;
+                }
+                else
+                {
+                    stockQuantity = item.Quantity;
+                    unitsPerPackAtSale = 1;
+                    unitPrice = product.SellingPrice;
+                }
+
+                if (product.QuantityInStock < stockQuantity)
+                {
+                    throw new InvalidOperationException(
+                        $"Insufficient stock for {product.ProductName}. " +
+                        $"Required: {stockQuantity} individual unit(s). " +
+                        $"Available: {product.QuantityInStock}.");
+                }
+
+                product.QuantityInStock -= stockQuantity;
+
+                decimal itemTotal = unitPrice * item.Quantity;
+
+                subtotal += itemTotal;
+
+                sale.Items.Add(new SaleItem
+                {
+                    ProductId = product.ProductId,
+                    Quantity = item.Quantity,
+                    SaleUnitType = saleUnitType,
+                    UnitsPerPackAtSale = unitsPerPackAtSale,
+                    StockQuantity = stockQuantity,
+                    UnitPrice = unitPrice,
+                    Total = itemTotal
+                });
+            }
+
+            sale.Subtotal = subtotal;
+            sale.Vat = 0m;
+            sale.Total = subtotal;
+            sale.ChangeGiven = sale.AmountPaid - sale.Total;
+
+            await _repository.AddSaleAsync(sale);
+
+            await _repository.SaveChangesAsync();
+
+            await transaction.CommitAsync();
+
+            return sale.SaleId;
         }
-
-        if (product.UnitsPerPack <= 0)
+        catch
         {
-            throw new InvalidOperationException(
-                $"{product.ProductName} has an invalid pack configuration.");
+            await transaction.RollbackAsync();
+            throw;
         }
-
-        if (!product.SellingPricePerPack.HasValue)
-        {
-            throw new InvalidOperationException(
-                $"{product.ProductName} does not have a pack selling price.");
-        }
-
-        if (product.SellingPricePerPack.Value <= 0)
-        {
-            throw new InvalidOperationException(
-                $"{product.ProductName} has an invalid pack selling price.");
-        }
-
-        stockQuantity = checked(
-            item.Quantity * product.UnitsPerPack);
-
-        unitsPerPackAtSale = product.UnitsPerPack;
-
-        unitPrice = product.SellingPricePerPack.Value;
-    }
-    else
-    {
-        stockQuantity = item.Quantity;
-
-        unitsPerPackAtSale = 1;
-
-        unitPrice = product.SellingPrice;
-    }
-
-    // Validate available individual-unit stock.
-    if (product.QuantityInStock < stockQuantity)
-    {
-        throw new InvalidOperationException(
-            $"Insufficient stock for {product.ProductName}. " +
-            $"Required: {stockQuantity} individual unit(s). " +
-            $"Available: {product.QuantityInStock}.");
-    }
-
-    // Deduct actual individual units from inventory.
-    product.QuantityInStock -= stockQuantity;
-
-    // Calculate the sale using the appropriate selling price.
-    decimal itemTotal = unitPrice * item.Quantity;
-
-    subtotal += itemTotal;
-
-    sale.Items.Add(new SaleItem
-    {
-        ProductId = product.ProductId,
-
-        Quantity = item.Quantity,
-
-        SaleUnitType = saleUnitType,
-
-        UnitsPerPackAtSale = unitsPerPackAtSale,
-
-        StockQuantity = stockQuantity,
-
-        UnitPrice = unitPrice,
-
-        Total = itemTotal
     });
 }
-
-        sale.Subtotal = subtotal;
-        sale.Vat = 0m;
-        sale.Total = sale.Subtotal;
-        sale.ChangeGiven = sale.AmountPaid - sale.Total;
-
-        await _repository.AddSaleAsync(sale);
-        await _repository.SaveChangesAsync();
-
-        await transaction.CommitAsync();
-
-        return sale.SaleId;
-    }
 
     public async Task<List<SaleHistoryDto>> GetMySalesAsync(
         int userId)
